@@ -7,8 +7,8 @@
 
 ## 当前状态
 
-V2 收敛已完成，本地可跑通全部功能；Docker 部署文件已写好，只剩容器层验证
-和一个明确延后的功能页。
+V2 收敛已完成，本地可跑通全部功能；镜像已由 GitHub Actions 构建并推到 GHCR，
+只剩在部署机上的容器运行时验证和一个明确延后的功能页。
 
 最后核对：2026-08-24（以实际代码 + 实跑验证为准）。
 
@@ -24,7 +24,10 @@ V2 收敛已完成，本地可跑通全部功能；Docker 部署文件已写好�
 - [x] 登录改用用户名（不再用邮箱，项目本身不发邮件）
 - [x] Docker 部署文件已完成（`Dockerfile` / `docker-compose.yml` / `docker-entrypoint.sh` /
       GitHub Actions 多架构构建），见 `docs/v2/08-DEPLOY-DOCKER.md`
-- [ ] Docker 容器层验证（镜像由 GitHub Actions 构建，清单见上述文档第十节）
+- [x] 已发布到 GitHub 公开仓库 `ibelieve3212/canvas-commerce`
+- [x] GitHub Actions 首次运行通过，双架构镜像已在
+      `ghcr.io/ibelieve3212/canvas-commerce:latest`（amd64 81.2MB / arm64 82.0MB）
+- [ ] Docker 容器**运行时**验证（清单见上述文档第十节第二关）
 
 待办的 P2 项（不阻塞发布）：游标分页、慢查询记录、三视口视觉回归截图对比、
 资产库作为参考素材复用、自定义应用（`Application.kind = CUSTOM` 已预留数据模型）。
@@ -74,12 +77,15 @@ canvas-commerce/
 镜像由 GitHub Actions 构建双架构（amd64 + arm64）后推到 GHCR，部署机只拉不构建：
 
 ```bash
-cp .env.docker.example .env    # 填 AUTH_SECRET 与 IMAGE
+cp .env.docker.example .env    # 填 AUTH_SECRET；IMAGE 已预填 GHCR 地址
 docker compose pull
 docker compose up -d
 ```
 
-完整说明、六个已知坑、验证清单见 `docs/v2/08-DEPLOY-DOCKER.md`。
+镜像地址 `ghcr.io/ibelieve3212/canvas-commerce:latest`，
+压缩体积 amd64 81.2MB / arm64 82.0MB。
+
+完整说明、九个已知坑、验证清单见 `docs/v2/08-DEPLOY-DOCKER.md`。
 
 ## ⚙️ 技术栈（V2 收敛后）
 
@@ -112,7 +118,7 @@ docker compose up -d
 | `docs/v2/05-ENV-VARS.md` | 环境变量完整清单 |
 | `docs/v2/06-FILE-MAP.md` | 目录与文件结构说明 |
 | `docs/v2/07-DEPLOY-LOCAL.md` | 本地开发启动方式 |
-| `docs/v2/08-DEPLOY-DOCKER.md` | Docker 部署（已落实：镜像结构、六个坑、验证清单、故障排查） |
+| `docs/v2/08-DEPLOY-DOCKER.md` | Docker 部署（已落实：镜像结构、九个坑、验证清单、故障排查） |
 | `docs/v2/09-RISKS-AND-GOTCHAS.md` | 已知坑点、原生模块、Windows 特殊问题 |
 | `docs/v2/10-LLM-MAINTENANCE-GUIDE.md` | 维护手册与禁区，**任何 LLM 接手前必读** |
 | `docs/v2/11-FUTURE-OPTIMIZATIONS.md` | OPT-1~7 决策记录与落地情况 |

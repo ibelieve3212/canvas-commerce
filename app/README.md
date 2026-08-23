@@ -223,5 +223,5 @@ docker compose up -d
 ```
 
 完整说明见 `../docs/v2/08-DEPLOY-DOCKER.md`。**改 Dockerfile 前必读该文档
-第四节「六个坑」** —— hoisted linker、两阶段 WORKDIR 必须一致、
+第四节「九个坑」** —— hoisted linker、两阶段 WORKDIR 必须一致、
 sharp 的 libvips 要手动 COPY 等，凭直觉简化必坏。
