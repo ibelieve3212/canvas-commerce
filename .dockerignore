@@ -1,0 +1,84 @@
+# Docker 构建上下文排除清单。
+# 目标：只把构建真正需要的东西送进 daemon。node_modules 有 901M，
+# 不排除的话每次构建光传上下文就要几分钟，且容器内会用错平台的原生模块。
+
+# ---- 依赖与构建产物（容器内重新装/重新构建）----
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+out
+build
+
+# ---- 运行时数据（绝不进镜像）----
+# 数据库和用户上传的图片走 volume 挂载。打进镜像会导致
+# 每次更新镜像把用户数据覆盖回构建时的快照。
+.data
+**/.data
+
+# ---- 密钥 ----
+# 必须带 **/ ：Docker 的 * 不跳目录分隔，单写 `.env` 只能排根目录的，
+# 排不掉 app/.env——那份会被 COPY app/ 带进 builder 层并进入构建缓存。
+.env
+**/.env
+.env.local
+**/.env.local
+.env*.local
+**/.env*.local
+.env.test-provider
+**/.env.test-provider
+*.pem
+**/*.pem
+
+# ---- 测试相关（镜像不跑测试）----
+tests
+**/tests
+test-results
+**/test-results
+playwright-report
+**/playwright-report
+blob-report
+**/blob-report
+coverage
+**/coverage
+playwright.config.ts
+**/playwright.config.ts
+vitest.config.ts
+**/vitest.config.ts
+
+# ---- 文档与开发脚本 ----
+# 同样需要 **/：*.md 只匹配根目录。文档进镜像无害但无用，
+# 且会让任何文档改动都冻掉构建缓存。
+docs
+*.md
+**/*.md
+setup.bat
+start-dev.bat
+
+# ---- 版本控制与 CI ----
+.git
+.gitignore
+.github
+
+# ---- 编辑器 / 系统 ----
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.log
+**/*.log
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# ---- Docker 自身 ----
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# ---- Windows 误产物 ----
+nul
+NUL
+npx

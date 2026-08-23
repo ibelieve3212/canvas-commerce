@@ -1,0 +1,41 @@
+# 仓库根 .gitignore。
+# app/ 目录另有一份更细的规则，两份都生效。
+
+# ---- 依赖 ----
+node_modules/
+.pnpm-store/
+
+# ---- 构建产物 ----
+.next/
+dist/
+out/
+build/
+*.tsbuildinfo
+
+# ---- 运行时数据（含数据库与用户图片，绝不入库）----
+.data/
+
+# ---- 环境变量与密钥（保留 *.example）----
+.env
+.env.local
+.env*.local
+.env.test-provider
+*.pem
+
+# ---- 测试产物 ----
+test-results/
+playwright-report/
+blob-report/
+coverage/
+
+# ---- 系统 / 编辑器 ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# ---- Windows 误产物 ----
+nul
+NUL
+npx

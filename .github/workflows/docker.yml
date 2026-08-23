@@ -1,0 +1,138 @@
+name: 构建并推送 Docker 镜像
+
+# 为什么分成两个原生 runner 而不是 buildx --platform linux/amd64,linux/arm64：
+# 后者的 arm64 侧走 QEMU 模拟，`next build` 会从几分钟变成 40 分钟以上，
+# 2GB 级别的 runner 还容易 OOM。公开仓库两种 runner 都免费，没有理由用 QEMU。
+#
+# 更关键的是正确性：Next 的文件追踪会把原生模块的 prebuild 裁剪到「构建时平台」
+# 那一个。在 amd64 上构建的产物里只有 linux-x64.node，拿到 arm64 上直接崩。
+# 所以必须各架构分别原生构建，最后合并 manifest。
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  # 允许手动触发，便于不改代码重新出镜像
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            suffix: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            suffix: arm64
+
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          # GITHUB_TOKEN 够用，不需要单独建 PAT
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建并按架构推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: true
+          # 每个架构先推一个带后缀的独立 tag，下一个 job 合并成多架构 manifest
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}-${{ matrix.suffix }}
+          # 缓存存在 GitHub Actions cache 里，第二次构建只重跑变化的层。
+          # scope 按架构分开，否则两个 job 会互相覆盖缓存。
+          cache-from: type=gha,scope=${{ matrix.suffix }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.suffix }}
+          provenance: false
+
+  merge:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      # imagetools 是 buildx 的子命令，runner 自带 buildx 但显式装一次更稳
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 计算镜像 tag
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 合并成多架构 manifest
+        shell: bash
+        run: |
+          set -eu
+          BASE="${REGISTRY}/${IMAGE_NAME}"
+          SRC_AMD64="${BASE}:${GITHUB_SHA}-amd64"
+          SRC_ARM64="${BASE}:${GITHUB_SHA}-arm64"
+
+          # metadata-action 输出的是换行分隔的完整镜像引用，转成 -t 参数
+          TAG_ARGS=""
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            TAG_ARGS="${TAG_ARGS} -t ${tag}"
+          done <<< "${TAGS}"
+
+          if [ -z "${TAG_ARGS}" ]; then
+            echo "metadata-action 没输出任何 tag，不能继续" >&2
+            exit 1
+          fi
+
+          echo "合并 ${SRC_AMD64} + ${SRC_ARM64}"
+          echo "目标 tag:${TAG_ARGS}"
+
+          # shellcheck disable=SC2086
+          docker buildx imagetools create ${TAG_ARGS} "${SRC_AMD64}" "${SRC_ARM64}"
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+
+      - name: 校验多架构 manifest
+        shell: bash
+        run: |
+          set -eu
+          # 取第一个 tag 来验证。不写死 :latest：打 tag 触发时不一定有 latest
+          TAG="$(printf '%s\n' "${TAGS}" | head -n 1)"
+          echo "校验 ${TAG}"
+          docker buildx imagetools inspect "${TAG}" | tee /tmp/inspect.txt
+          # 确认合并结果真的包含两个架构，而不是静默只出了一个
+          grep -q "linux/amd64" /tmp/inspect.txt
+          grep -q "linux/arm64" /tmp/inspect.txt
+          echo "manifest 含 amd64 与 arm64"
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}

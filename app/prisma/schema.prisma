@@ -1,0 +1,368 @@
+// CanvasCommerce 数据模型
+// V2 固定使用 SQLite 作为唯一数据库，不再支持切换 PostgreSQL。
+// 数据库文件路径由环境变量 DATABASE_URL 指定，默认 file:.data/db/dev.db
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ============ 身份 ============
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+model User {
+  id              String     @id @default(cuid())
+  // 登录标识符。用户名而非邮箱——本项目不发邮件，邮箱格式只是无谓的约束。
+  username        String     @unique
+  name            String
+  passwordHash    String
+  role            UserRole   @default(USER)
+  status          UserStatus @default(ACTIVE)
+  // 会话版本：停用/重置密码后递增，旧 session 失效
+  sessionVersion  Int        @default(0)
+  // 用户级 Provider 配置（为空时用管理员默认/env）
+  providerBaseUrl String?
+  providerApiKey  String?
+  providerModel   String?
+  // Chat 渠道配置（为空时用管理员默认/env）
+  chatBaseUrl   String?
+  chatApiKey    String?
+  chatModel     String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  favorites    ApplicationFavorite[]
+  uploads      Upload[]
+  batches      GenerationBatch[]
+  assets       Asset[]
+  exports      Export[]
+  quota        UserQuota?
+  reservations QuotaReservation[]
+  sessions     Session[]
+  chatConversations ChatConversation[]
+  @@index([username])
+}
+
+model Session {
+  id             String   @id @default(cuid())
+  userId         String
+  token          String   @unique
+  expiresAt      DateTime
+  ip             String?
+  userAgent      String?
+  sessionVersion Int
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+// ============ 应用 ============
+
+enum ApplicationKind {
+  DETAIL_PAGE
+  MAIN_IMAGE
+  BUYER_SHOW
+  POSTER
+  CUSTOM
+}
+
+enum ApplicationVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+model Application {
+  id                 String                @id
+  slug               String                @unique
+  name               String
+  description        String
+  kind               ApplicationKind
+  visibility         ApplicationVisibility @default(PUBLIC)
+  category           String
+  emojiIcon          String?
+  tagline            String                @default("")
+  tagsJson           String                @default("[]")
+  outputConfigJson   String
+  outputRolesJson    String                @default("[]")
+  formSchemaJson     String                @default("[]")
+  promptTemplate     String                @default("")
+  defaultAspectRatio String                @default("1:1")
+  templateVersion    Int                   @default(1)
+  isPublished        Boolean               @default(true)
+  sortOrder          Int                   @default(0)
+  ownerId            String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  favorites ApplicationFavorite[]
+  batches   GenerationBatch[]
+
+  @@index([visibility])
+  @@index([category])
+}
+
+model ApplicationFavorite {
+  userId        String
+  applicationId String
+  createdAt     DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, applicationId])
+}
+
+// ============ 上传 ============
+
+model Upload {
+  id           String    @id @default(cuid())
+  userId       String
+  objectKey    String
+  thumbnailKey String?
+  originalName String
+  mimeType     String
+  byteSize     Int
+  width        Int?
+  height       Int?
+  sha256       String
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Upload 不与 Batch/Asset 建物理关系；Batch 的 uploadId 记在 inputSnapshotJson
+  // Asset 通过 sourceUploadId 引用
+
+  sourceAssets Asset[] @relation("SourceUploadAssets")
+
+  @@index([userId])
+  @@index([sha256])
+}
+
+// ============ 生成 ============
+
+enum BatchStatus {
+  draft
+  queued
+  running
+  partial
+  completed
+  failed
+  canceled
+}
+
+model GenerationBatch {
+  id                   String      @id @default(cuid())
+  userId               String
+  applicationId        String
+  parentBatchId        String?
+  status               BatchStatus @default(queued)
+  inputSnapshotJson    String
+  templateSnapshotJson String
+  requestedCount       Int
+  succeededCount       Int         @default(0)
+  failedCount          Int         @default(0)
+  canceledCount        Int         @default(0)
+  idempotencyKey       String?
+  aspectRatio          String      @default("1:1")
+  createdAt            DateTime    @default(now())
+  startedAt            DateTime?
+  completedAt          DateTime?
+
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application  Application       @relation(fields: [applicationId], references: [id])
+  parentBatch  GenerationBatch?  @relation("BatchVersionChain", fields: [parentBatchId], references: [id])
+  childBatches GenerationBatch[] @relation("BatchVersionChain")
+  jobs         GenerationJob[]
+  exports      Export[]
+  reservation  QuotaReservation?
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId])
+  @@index([applicationId])
+  @@index([status])
+  @@index([parentBatchId])
+}
+
+enum JobStatus {
+  queued
+  running
+  succeeded
+  failed
+  canceled
+}
+
+model GenerationJob {
+  id                 String    @id @default(cuid())
+  batchId            String
+  outputIndex        Int
+  outputRole         String
+  status             JobStatus @default(queued)
+  provider           String    @default("mock")
+  providerRequestId  String?
+  attempt            Int       @default(0)
+  promptSnapshotJson String
+  errorCode          String?
+  errorMessage       String?
+  startedAt          DateTime?
+  completedAt        DateTime?
+
+  batch GenerationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  asset Asset?
+
+  @@unique([batchId, outputIndex])
+  @@index([batchId])
+  @@index([status])
+}
+
+// ============ 资产 ============
+
+model Asset {
+  id             String   @id @default(cuid())
+  userId         String
+  jobId          String?  @unique
+  parentAssetId  String?
+  sourceUploadId String?
+  objectKey      String
+  thumbnailKey   String?
+  mimeType       String
+  byteSize       Int
+  width          Int?
+  height         Int?
+  isFavorite     Boolean  @default(false)
+  metadataJson   String   @default("{}")
+  createdAt      DateTime @default(now())
+
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job          GenerationJob? @relation(fields: [jobId], references: [id])
+  sourceUpload Upload?        @relation("SourceUploadAssets", fields: [sourceUploadId], references: [id])
+  parentAsset  Asset?         @relation("AssetTweakTree", fields: [parentAssetId], references: [id])
+  childAssets  Asset[]        @relation("AssetTweakTree")
+
+  @@index([userId])
+  @@index([jobId])
+  @@index([parentAssetId])
+}
+
+// ============ 导出（阶段3） ============
+
+enum ExportType {
+  COMPOSED_IMAGE
+  ZIP
+  LONG_IMAGE
+}
+
+enum ExportStatus {
+  pending
+  running
+  succeeded
+  failed
+  canceled
+}
+
+model Export {
+  id           String       @id @default(cuid())
+  userId       String
+  batchId      String?
+  type         ExportType
+  status       ExportStatus @default(pending)
+  objectKey    String?
+  errorMessage String?
+  expiresAt    DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  user  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batch GenerationBatch? @relation(fields: [batchId], references: [id])
+
+  @@index([userId])
+  @@index([batchId])
+}
+
+// ============ 配额 ============
+
+model UserQuota {
+  userId         String   @id
+  dailyLimit     Int      @default(20)
+  totalQuota     Int      @default(100)
+  maxConcurrency Int      @default(2)
+  dailyUsed      Int      @default(0)
+  totalUsed      Int      @default(0)
+  dailyDate      String
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([dailyDate])
+}
+
+enum ReservationStatus {
+  PENDING
+  SETTLED
+  RELEASED
+}
+
+model QuotaReservation {
+  id            String            @id @default(cuid())
+  userId        String
+  batchId       String            @unique
+  reservedCount Int
+  settledCount  Int               @default(0)
+  status        ReservationStatus @default(PENDING)
+  createdAt     DateTime          @default(now())
+  settledAt     DateTime?
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batch GenerationBatch @relation(fields: [batchId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ============ 聊天助手 ============
+
+model ChatConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String   @default("新会话")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@index([userId])
+}
+
+model ChatMessage {
+  id              String   @id @default(cuid())
+  conversationId  String
+  role            String   // "user" | "assistant"
+  content         String   @default("")
+  imageObjectKey   String?  // 贴图存储路径
+  createdAt       DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

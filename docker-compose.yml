@@ -1,0 +1,95 @@
+# CanvasCommerce 单容器部署。
+#
+# 用法：
+#   1. cp .env.docker.example .env  并填 AUTH_SECRET 与 IMAGE
+#   2. docker compose pull
+#   3. docker compose up -d
+#   4. 首次启动会自动建库 + 建管理员（admin / admin123），登录后立刻改密码
+#
+# 注意本文件故意**没有 build: 段**。镜像一律由 GitHub Actions 构建
+# （双架构原生 runner），部署机只拉不构。写了 build: 的后果是：
+# 本地没镜像时 `docker compose up` 会默默开始构建，在 2GB 内存的部署机上
+# `next build` 会 OOM；而在 x86 机器上构出的产物又不能给 ARM 服务器用
+# （Next 的文件追踪会把原生模块 prebuild 裁到构建平台那一个）。
+# 要改代码就 push，让 CI 出新镜像，然后 pull。
+
+services:
+  app:
+    # 必填：在 .env 里写完整镜像引用。
+    # 多架构 manifest，Docker 会自动选 amd64 / arm64。
+    image: ${IMAGE:?必须在 .env 里设置 IMAGE，如 ghcr.io/yourname/canvas-commerce:latest}
+    container_name: canvas-commerce
+    restart: unless-stopped
+
+    ports:
+      # 默认只绑到 127.0.0.1 —— 应用自带账号鉴权，但不该在没有反向代理
+      # （TLS + 限流）的情况下直接对公网开放。要开放请显式改成 "3000:3000"
+      # 或在前面放 Caddy/Nginx。
+      - "127.0.0.1:${HOST_PORT:-3000}:3000"
+
+    environment:
+      # ---- 必填 ----
+      # 会话 cookie 签名密钥。生成：openssl rand -base64 32
+      AUTH_SECRET: ${AUTH_SECRET:?必须设置 AUTH_SECRET，至少 16 字符}
+
+      # 对外访问地址。反向代理后填公网域名，否则回调/绝对链接会指向 localhost
+      APP_URL: ${APP_URL:-http://localhost:3000}
+
+      # ---- 首次启动的管理员账号（仅当库里没有任何管理员时生效）----
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+
+      # ---- 图片生成 Provider ----
+      # mock = 不调外部 API，生成占位图，用于验证部署是否正常
+      # newapi = 调 OpenAI 兼容接口；也可以登录后在设置页配，无需改这里
+      GENERATION_PROVIDER: ${GENERATION_PROVIDER:-mock}
+      CCLOAD_NEW_API_BASE_URL: ${CCLOAD_NEW_API_BASE_URL:-}
+      CCLOAD_NEW_API_TOKEN: ${CCLOAD_NEW_API_TOKEN:-}
+      CCLOAD_IMAGE_MODEL: ${CCLOAD_IMAGE_MODEL:-gpt-image-2}
+
+      # ---- 配额默认值（新用户）----
+      QUOTA_DAILY_DEFAULT: ${QUOTA_DAILY_DEFAULT:-20}
+      QUOTA_TOTAL_DEFAULT: ${QUOTA_TOTAL_DEFAULT:-100}
+      QUOTA_MAX_CONCURRENCY_DEFAULT: ${QUOTA_MAX_CONCURRENCY_DEFAULT:-2}
+
+      # ---- 自动清理兜底值 ----
+      # 管理员在设置页改的值存数据库、优先级更高、改完即时生效。
+      # 这里只在数据库无配置时使用（如全新部署）。
+      ASSET_RETENTION_DAYS: ${ASSET_RETENTION_DAYS:-30}
+      MAX_ASSETS_PER_USER: ${MAX_ASSETS_PER_USER:-300}
+      CHAT_RETENTION_DAYS: ${CHAT_RETENTION_DAYS:-30}
+      FAILED_JOB_RETENTION_DAYS: ${FAILED_JOB_RETENTION_DAYS:-7}
+      CLEANUP_INTERVAL_HOURS: ${CLEANUP_INTERVAL_HOURS:-6}
+
+    volumes:
+      # 数据库 + 用户上传/生成的图片。删掉这个 volume 等于清空所有数据。
+      # 用具名 volume 而非绑定挂载：绑定挂载会带宿主机的 uid/gid，
+      # 容器内非 root 用户（node）常写不进去。
+      - canvas-data:/app/.data
+
+    # 2GB 内存的小机器上，Node 默认堆上限可能超过可用内存导致 OOM 被杀。
+    # 这里只限制容器内存，Node 会自适应。若你的机器内存更大可以调高或删掉。
+    # 注意这是**运行时**限制；构建不在这台机器上发生，所以不需要为 next build 留余量。
+    mem_limit: ${MEM_LIMIT:-1500m}
+
+    healthcheck:
+      # 与 Dockerfile 里的 HEALTHCHECK 一致，写在这里便于覆盖调整
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+
+    logging:
+      # 不限制的话 json-file 会无限增长，小机器上磁盘容易被日志吃满
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  canvas-data:

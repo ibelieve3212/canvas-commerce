@@ -1,0 +1,41 @@
+name: CI
+
+# 只跑类型检查、lint 和单测。E2E 留在本地跑：
+# 它需要 dev server + chromium（400M+ 下载），在 CI 上又慢又脆，
+# 而本地跑一轮 20 分钟就能覆盖 123 个用例。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      # --ignore-scripts：原生模块走 prebuild，不需要本地编译
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # 类型检查依赖 Prisma 生成的类型，必须先 generate
+      - run: pnpm prisma:generate
+
+      - run: pnpm typecheck
+
+      - run: pnpm lint
+
+      - run: pnpm test

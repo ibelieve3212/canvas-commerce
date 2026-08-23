@@ -1,0 +1,57 @@
+# 依赖
+node_modules/
+**/node_modules/
+/.pnp
+.pnp.*
+
+# Next 构建产物
+.next/
+**/.next/
+/out/
+# next-env.d.ts 由 next 自动生成，但**官方要求入库**（tsconfig.json 的 include 里列了它）。
+# 不入库的话干净 checkout 后 tsc 缺全局类型声明，实测会报
+# `Cannot find name 'PromiseWithResolvers' / 'URLPattern'` 等一堆错。
+# （此处原有一条 `next-env.d.ts` 忽略规则，带行尾注释。gitignore 不支持
+#   行尾注释，那条规则实际在匹配“next-env.d.ts  # …”这个文件名，
+#   从未生效。事实上不应该忽略它，因此直接删除该规则。）
+
+# 构建
+/build/
+/dist/
+**/dist/
+
+# TypeScript 缓存
+*.tsbuildinfo
+
+# 数据库与本地存储（含用户数据，绝不入库）
+.data/
+**/.data/
+/prisma/migrations/dev.db*
+
+# 测试产物
+/test-results/
+**/test-results/
+/playwright-report/
+/blob-report/
+/coverage/
+
+# 环境变量 / 密钥（保留 .env.example）
+.env
+.env.local
+.env*.local
+.env.test-provider
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+*.pem
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.idea
+.vscode/
+
+# Windows 误产物
+nul
+NUL
+npx

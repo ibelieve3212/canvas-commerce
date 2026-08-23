@@ -1,0 +1,15 @@
+allowBuilds:
+  "@prisma/engines": true
+  argon2: true
+  esbuild: true
+  msgpackr-extract: true
+  prisma: true
+  unrs-resolver: true
+  better-sqlite3: true
+overrides:
+  better-sqlite3: 13.0.3
+# pnpm 11 起配置从 .npmrc 迁到本文件。
+# 关掉"运行脚本前校验依赖"——本机 node_modules 是 --ignore-scripts 装的
+# （better-sqlite3 走 prebuilds，不需要本地编译），校验会误判为缺依赖并触发
+# pnpm install → node-gyp 编译失败 → start-dev.bat 起不来。
+verifyDepsBeforeRun: false
