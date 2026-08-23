@@ -2,9 +2,6 @@
 
 电商商品图生成工具。上传商品图 + 选场景 → 模型出图 → 微调 / 导出长图。
 
-**文档是唯一事实来源，动手前先读 `docs/`。** 任何 LLM 接手请先读
-`AGENTS.md` → `docs/v2/00-OVERVIEW.md` → `docs/v2/10-LLM-MAINTENANCE-GUIDE.md`。
-
 ## 当前状态
 
 本地可跑通全部功能；镜像已由 GitHub Actions 构建并推到 GHCR，
@@ -12,20 +9,18 @@
 
 最后核对：2026-08-24（以实际代码 + 实跑验证为准）。
 
-- [x] 文档骨架已建好（`docs/v2/` 全套 + `docs/spec/`）
 - [x] 整体验证：`pnpm typecheck` / `pnpm lint` 通过，单测 67 例、E2E 123 例（3 视口）全绿，
       `pnpm build` + `next start` 生产模式实跑通过
-- [x] 后续优化项 OPT-1 ~ OPT-7 已落地（见 `docs/v2/11-FUTURE-OPTIMIZATIONS.md`）
 - [x] 自动清理策略可在设置页配置（管理员，含"本次将删除 N 张"预览 + 二次确认）
 - [x] 上传的商品图也纳入自动清理（与资产共用 30 天 / 300 张，各自独立计数）
 - [ ] 管理员批量清理页（存储概览 + 按用户/时间筛选 + 手动批量删除）—— 已明确延后
 - [x] 登录改用用户名（不再用邮箱，项目本身不发邮件）
 - [x] Docker 部署文件已完成（`Dockerfile` / `docker-compose.yml` / `docker-entrypoint.sh` /
-      GitHub Actions 多架构构建），见 `docs/v2/08-DEPLOY-DOCKER.md`
+      GitHub Actions 多架构构建）
 - [x] 已发布到 GitHub 公开仓库 `ibelieve3212/canvas-commerce`
 - [x] GitHub Actions 首次运行通过，双架构镜像已在
       `ghcr.io/ibelieve3212/canvas-commerce:latest`（amd64 81.2MB / arm64 82.0MB）
-- [ ] Docker 容器**运行时**验证（清单见上述文档第十节第二关）
+- [ ] Docker 容器**运行时**验证
 
 待办的 P2 项（不阻塞发布）：游标分页、慢查询记录、三视口视觉回归截图对比、
 资产库作为参考素材复用、自定义应用（`Application.kind = CUSTOM` 已预留数据模型）。
@@ -39,13 +34,11 @@ cd app
 pnpm install
 pnpm prisma:generate
 pnpm db:migrate          # 初始化本地 SQLite 数据库
-pnpm seed                # 填充开发用数据（内置应用 + 测试账号）
+pnpm seed                 # 填充开发用数据（内置应用 + 测试账号）
 pnpm dev                 # 启动开发服务器
 ```
 
-浏览器开 http://localhost:3000 。seed 账号：`admin / admin123`、`user / user123`。
-
-详细说明（含常见启动失败原因）见 `docs/v2/07-DEPLOY-LOCAL.md`。
+浏览器开 http://localhost:3000 。默认账号 `admin / admin123`，**登录后立刻改密码**。
 
 ### 图片会自动清理
 
@@ -59,7 +52,6 @@ pnpm dev                 # 启动开发服务器
 
 ```
 canvas-commerce/
-├── docs/                    # 文档（唯一事实来源，先读这里）
 ├── app/                     # 应用代码（完整 Next.js 项目）
 ├── Dockerfile               # 三阶段 alpine 构建
 ├── docker-compose.yml       # 单容器部署
@@ -68,7 +60,7 @@ canvas-commerce/
 └── .github/workflows/       # CI（检查）+ docker（多架构构建推 GHCR）
 ```
 
-`app/` 内是完整 Next.js 项目，结构详见 `docs/v2/06-FILE-MAP.md`。
+`app/` 内是完整 Next.js 项目，`app/README.md` 有详细的项目结构和开发说明。
 
 ### Docker 部署
 
@@ -124,7 +116,7 @@ docker compose pull
 docker compose up -d
 ```
 
-两种方式等效。完整说明、九个已知坑、验证清单、全部环境变量见 `docs/v2/08-DEPLOY-DOCKER.md`。
+两种方式等效。全部环境变量见 `.env.docker.example`。
 
 ## ⚙️ 技术栈
 
@@ -140,26 +132,5 @@ docker compose up -d
 | 样式 | Tailwind CSS 4 + Lucide Icons |
 | 测试 | Vitest（单测）+ Playwright（E2E，3 视口） |
 
-选型理由见 `docs/v2/04-TECH-STACK.md`。
-
 **明确不做**：Redis、PostgreSQL/MySQL、MinIO/S3、Nginx 反代、独立 Worker 进程、PM2。
 不要提议引入这些。
-
-## 📚 文档索引
-
-| 文档 | 何时读 |
-|---|---|
-| `AGENTS.md` | 工程约束与协作规则，**动手前必读** |
-| `MIGRATION-CHECKLIST.md` | 迁移进度追踪，确认哪些已完成 |
-| `docs/v2/00-OVERVIEW.md` | 文档总索引与阅读顺序 |
-| `docs/v2/01-WHAT-CHANGED.md` | 完整变更清单（每条改动 + 理由 + 风险） |
-| `docs/v2/03-ARCHITECTURE.md` | 唯一架构图与各组件职责 |
-| `docs/v2/05-ENV-VARS.md` | 环境变量完整清单 |
-| `docs/v2/06-FILE-MAP.md` | 目录与文件结构说明 |
-| `docs/v2/07-DEPLOY-LOCAL.md` | 本地开发启动方式 |
-| `docs/v2/08-DEPLOY-DOCKER.md` | Docker 部署（镜像结构、九个坑、验证清单、故障排查） |
-| `docs/v2/09-RISKS-AND-GOTCHAS.md` | 已知坑点、原生模块、Windows 特殊问题 |
-| `docs/v2/10-LLM-MAINTENANCE-GUIDE.md` | 维护手册与禁区，**任何 LLM 接手前必读** |
-| `docs/v2/11-FUTURE-OPTIMIZATIONS.md` | OPT-1~7 决策记录与落地情况 |
-| `docs/spec/` | 产品/UX/设计系统/验收标准（部分条目已被 OPT 推翻，注意删除线标注） |
-| `docs/_archive/` | 历史留档，仅供追溯 |

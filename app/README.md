@@ -2,14 +2,14 @@
 
 面向电商运营的 AI 商品图生产工作台。
 
-> **V2 说明**：本项目是 V2（收敛型），唯一部署形态为单容器单体——SQLite + 内存队列 + 本地存储 + 同进程 Worker。不使用 PostgreSQL / Redis / S3。
-> 完整 V2 文档见 `../docs/`，特别是 `../docs/v2/00-OVERVIEW.md`。
+唯一部署形态为单容器单体——SQLite + 内存队列 + 本地存储 + 同进程 Worker。
+不使用 PostgreSQL / Redis / S3。
 
 ## 快速开始
 
 ### 环境要求
 
-- Node.js 20+
+- Node.js 22+
 - pnpm 11+
 - SQLite（开发数据库，随 `better-sqlite3` 内置，无需安装外部服务）
 - ⚠️ **项目根目录路径不能含中文**，否则 pnpm 符号链接失效、Turbopack/webpack 编译异常。
@@ -33,8 +33,6 @@ STORAGE_LOCAL_PATH=.data/storage
 GENERATION_PROVIDER=mock
 ```
 
-> V2 环境变量完整清单见 `../docs/v2/05-ENV-VARS.md`。
-
 ### 初始化数据库
 
 ```bash
@@ -45,25 +43,22 @@ pnpm prisma:seed
 
 Seed 会创建：
 - admin / admin123（管理员）
-- user / user123（普通用户）
 - 4 个内置应用 + 默认配额
 
 ### 启动开发服务器
 
 ```bash
 pnpm dev
-# 或指定端口
-npx next dev --webpack -p 30143
 ```
 
-> ⚠️ **必须用 `--webpack` 模式**。Next.js 16 默认使用 Turbopack，但在含原生模块（`better-sqlite3`）的路由上会编译死锁。`--webpack` 模式下 `serverExternalPackages` 正确生效，不会卡死。
+> ⚠️ **必须用 `--webpack` 模式**（`pnpm dev` 脚本已配好）。Next.js 16 默认使用 Turbopack，但在含原生模块（`better-sqlite3`）的路由上会编译死锁。`--webpack` 模式下 `serverExternalPackages` 正确生效，不会卡死。
 
-访问 `http://localhost:3000`（或自定义端口），使用 seed 账号登录。
+访问 `http://localhost:3000`，使用 seed 账号登录。
 
 ### Worker 说明
 
 Worker 与 Next.js 同进程运行，由 `src/instrumentation.ts` 在进程启动时拉起——
-**dev 和生产都启动**。V2 不需要独立 worker 进程，也没有 `pnpm worker` 脚本。
+**dev 和生产都启动**。不需要独立 worker 进程，也没有 `pnpm worker` 脚本。
 
 Worker 做两件事：
 1. 队列轮询，处理生图 Job（内存队列，`onEnqueue` 唤醒 + 每 3 秒兜底轮询）
@@ -91,9 +86,7 @@ Worker 做两件事：
 
 - `better-sqlite3@13.0.3` 通过 `pnpm-workspace.yaml` 的 `overrides` 锁定版本，避免与 `@prisma/adapter-better-sqlite3` 间接依赖的 `@12.x` 冲突。
 - 本机无 Visual Studio C++ 工具链时，用 `pnpm install --offline --ignore-scripts` 保留 pnpm store 中的预编译二进制，不要重新编译。
-- 因此 `pnpm-workspace.yaml` 里设了 `verifyDepsBeforeRun: false`。pnpm 11 默认在跑脚本前校验依赖，
-  会把 `--ignore-scripts` 装出来的 node_modules 判为不完整并自动触发 `pnpm install`，
-  进而 node-gyp 编译 better-sqlite3 失败，`start-dev.bat` 起不来。这个配置项在 pnpm 11 里已从 `.npmrc` 迁到本文件。
+- 因此 `pnpm-workspace.yaml` 里设了 `verifyDepsBeforeRun: false`。pnpm 11 默认在跑脚本前校验依赖，会把 `--ignore-scripts` 装出来的 node_modules 判为不完整并自动触发 `pnpm install`，进而 node-gyp 编译 better-sqlite3 失败，`pnpm dev` 起不来。
 - `next.config.ts` 的 `serverExternalPackages` 已配置 `better-sqlite3`、`@prisma/client`、`@prisma/adapter-better-sqlite3`、`argon2`、`sharp`、`detect-libc`，webpack 不编译它们。
 
 ### 运行测试
@@ -154,7 +147,6 @@ tests/                    # 测试
 | 营销海报 | `/apps/poster` | 1/2/4/6 张 |
 
 生成结果可点"微调"用自然语言调整（调 `/v1/images/edits`，最多 3 轮，每轮扣 1 配额）。
-系统文字层（SVG 合成）已删除，不要试图恢复。
 
 ## Provider 配置
 
@@ -208,7 +200,7 @@ pnpm db:migrate          # 生产：自写 runner 直接执行 SQL（不需要 p
 ```
 
 ⚠️ 新增 migration **必须是纯 SQL**，生成后要跑一遍 `pnpm db:migrate` 确认
-自写 runner 能执行。原因见 `../docs/v2/09-RISKS-AND-GOTCHAS.md` 第 14 条。
+自写 runner 能执行。
 
 ### Docker 部署
 
@@ -217,11 +209,9 @@ pnpm db:migrate          # 生产：自写 runner 直接执行 SQL（不需要 p
 
 ```bash
 cd ..
-cp .env.docker.example .env    # 填 AUTH_SECRET 与 IMAGE
+cp .env.docker.example .env    # 填 AUTH_SECRET
 docker compose pull
 docker compose up -d
 ```
 
-完整说明见 `../docs/v2/08-DEPLOY-DOCKER.md`。**改 Dockerfile 前必读该文档
-第四节「九个坑」** —— hoisted linker、两阶段 WORKDIR 必须一致、
-sharp 的 libvips 要手动 COPY 等，凭直觉简化必坏。
+完整说明见仓库根目录的 `.env.docker.example` 和 `docker-compose.yml`。
