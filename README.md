@@ -85,20 +85,18 @@ docker run -d \
   --restart unless-stopped \
   -p 127.0.0.1:3000:3000 \
   -e AUTH_SECRET="$AUTH_SECRET" \
-  -e APP_URL=http://localhost:3000 \
-  -e GENERATION_PROVIDER=mock \
   -v canvas-data:/app/.data \
-  --memory=1500m \
-  --health-cmd="node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"" \
-  --health-interval=30s \
-  --health-timeout=5s \
-  --health-start-period=40s \
-  --health-retries=3 \
   ghcr.io/ibelieve3212/canvas-commerce:latest
 ```
 
 首次启动会自动建库、跑 migration、创建管理员（`admin / admin123`），
 看到 `[entrypoint] 就绪` 与 `[worker] 启动` 即成功。**登录后立刻改密码。**
+
+上面的命令已经是最小可用版本。镜像内置了 healthcheck，`APP_URL` 和
+`GENERATION_PROVIDER` 不传时会用默认值（`http://localhost:3000` 和 `mock`）。
+需要改的话加 `-e KEY=VALUE` 即可，全部变量见 `.env.docker.example`。
+
+2GB 内存的小机器可以加 `--memory=1500m` 限制容器内存。
 
 更新到新版本：
 
