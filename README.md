@@ -72,9 +72,53 @@ canvas-commerce/
 
 `app/` 内是完整 Next.js 项目，结构详见 `docs/v2/06-FILE-MAP.md`。
 
-### Docker 部署（一句话版）
+### Docker 部署
 
-镜像由 GitHub Actions 构建双架构（amd64 + arm64）后推到 GHCR，部署机只拉不构建：
+镜像由 GitHub Actions 构建双架构（amd64 + arm64）后推到 GHCR，部署机只拉不构建。
+镜像地址 `ghcr.io/ibelieve3212/canvas-commerce:latest`，压缩体积 amd64 81.2MB / arm64 82.0MB。
+
+**方式一：`docker run`（无需 docker-compose）**
+
+```bash
+# 1. 拉镜像
+docker pull ghcr.io/ibelieve3212/canvas-commerce:latest
+
+# 2. 创建数据卷（数据库 + 用户上传/生成的图片全在里面）
+docker volume create canvas-data
+
+# 3. 生成密钥
+AUTH_SECRET=$(openssl rand -base64 32)
+
+# 4. 启动
+docker run -d \
+  --name canvas-commerce \
+  --restart unless-stopped \
+  -p 127.0.0.1:3000:3000 \
+  -e AUTH_SECRET="$AUTH_SECRET" \
+  -e APP_URL=http://localhost:3000 \
+  -e GENERATION_PROVIDER=mock \
+  -v canvas-data:/app/.data \
+  --memory=1500m \
+  --health-cmd="node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"" \
+  --health-interval=30s \
+  --health-timeout=5s \
+  --health-start-period=40s \
+  --health-retries=3 \
+  ghcr.io/ibelieve3212/canvas-commerce:latest
+```
+
+首次启动会自动建库、跑 migration、创建管理员（`admin / admin123`），
+看到 `[entrypoint] 就绪` 与 `[worker] 启动` 即成功。**登录后立刻改密码。**
+
+更新到新版本：
+
+```bash
+docker pull ghcr.io/ibelieve3212/canvas-commerce:latest
+docker rm -f canvas-commerce        # 数据在 volume 里，不受影响
+# 重新执行上面的 docker run（AUTH_SECRET 要用同一个值）
+```
+
+**方式二：`docker compose`**
 
 ```bash
 cp .env.docker.example .env    # 填 AUTH_SECRET；IMAGE 已预填 GHCR 地址
@@ -82,10 +126,7 @@ docker compose pull
 docker compose up -d
 ```
 
-镜像地址 `ghcr.io/ibelieve3212/canvas-commerce:latest`，
-压缩体积 amd64 81.2MB / arm64 82.0MB。
-
-完整说明、九个已知坑、验证清单见 `docs/v2/08-DEPLOY-DOCKER.md`。
+两种方式等效。完整说明、九个已知坑、验证清单、全部环境变量见 `docs/v2/08-DEPLOY-DOCKER.md`。
 
 ## ⚙️ 技术栈（V2 收敛后）
 
