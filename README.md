@@ -83,7 +83,7 @@ AUTH_SECRET=$(openssl rand -base64 32)
 docker run -d \
   --name canvas-commerce \
   --restart unless-stopped \
-  -p 127.0.0.1:3000:3000 \
+  -p 3000:3000 \
   -e AUTH_SECRET="$AUTH_SECRET" \
   -v canvas-data:/app/.data \
   ghcr.io/ibelieve3212/canvas-commerce:latest
@@ -96,7 +96,11 @@ docker run -d \
 `GENERATION_PROVIDER` 不传时会用默认值（`http://localhost:3000` 和 `mock`）。
 需要改的话加 `-e KEY=VALUE` 即可，全部变量见 `.env.docker.example`。
 
-2GB 内存的小机器可以加 `--memory=1500m` 限制容器内存。
+常用可选项：
+- 只绑本机访问（不对外暴露）：把 `-p 3000:3000` 改成 `-p 127.0.0.1:3000:3000`
+- 自定义数据目录（方便直接备份/管理文件）：把 `-v canvas-data:/app/.data`
+  换成 `-v /你的路径:/app/.data`
+- 2GB 内存小机器加 `--memory=1500m` 限制容器内存
 
 更新到新版本：
 
