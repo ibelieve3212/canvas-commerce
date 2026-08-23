@@ -20,7 +20,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # package_json_file 必须显式指到 app/。
+      # defaults.run.working-directory 只影响 run 步骤，action 自身仍在仓库根
+      # 找 package.json，而根目录没有 —— 报 "No pnpm version is specified"。
       - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: app/package.json
 
       - uses: actions/setup-node@v4
         with:

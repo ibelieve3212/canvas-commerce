@@ -24,6 +24,14 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
+  // `next build` 也会跑 instrumentation，且构建时 NODE_ENV 就是 production，
+  // 于是 worker 会在构建期启动并立即查库。构建环境（尤其是 Docker 的 builder
+  // 阶段）没有 .data/db 目录，日志会刷一屏
+  // `prisma:error Cannot open database because the directory does not exist`，
+  // 而且启动一个永不退出的轮询循环对构建没任何意义。
+  // NEXT_PHASE 由 Next 在构建时设为 phase-production-build。
+  if (process.env.NEXT_PHASE === "phase-production-build") return;
+
   try {
     if (process.env.NODE_ENV === "production") {
       // 生产：打包器需要看见这个 import 才能把 worker 打进 standalone 产物

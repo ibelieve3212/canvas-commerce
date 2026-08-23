@@ -8,12 +8,13 @@ node_modules/
 .next/
 **/.next/
 /out/
-# next-env.d.ts 由 next 自动生成，但**官方要求入库**（tsconfig.json 的 include 里列了它）。
-# 不入库的话干净 checkout 后 tsc 缺全局类型声明，实测会报
-# `Cannot find name 'PromiseWithResolvers' / 'URLPattern'` 等一堆错。
-# （此处原有一条 `next-env.d.ts` 忽略规则，带行尾注释。gitignore 不支持
-#   行尾注释，那条规则实际在匹配“next-env.d.ts  # …”这个文件名，
-#   从未生效。事实上不应该忽略它，因此直接删除该规则。）
+# next-env.d.ts 由 next 自动生成，不入库。
+# 它的内容会随上一次构建模式变（dev 时引 ./.next/dev/types/…，
+# 生产构建时引 ./.next/types/…），入库会造成无意义的反复 diff。
+# 官方文档建议入库，但已实测：删掉它 + 删掉 .next 后跑 tsc --noEmit 仍为 0
+# （本项目 tsconfig 开了 skipLibCheck），所以 CI 不需要它。
+next-env.d.ts
+**/next-env.d.ts
 
 # 构建
 /build/

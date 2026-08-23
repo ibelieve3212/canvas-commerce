@@ -1,0 +1,4 @@
+# 占位文件：让 git 跟踪这个空目录。
+# 没有它的话 Dockerfile 的 `COPY /app/public ./public` 在 CI 上会失败
+# （git 不跟踪空目录，checkout 后 public/ 根本不存在）。
+# 将来放 favicon、robots.txt 等静态资源时可以删掉本文件。
