@@ -6,7 +6,6 @@ import { cn } from "@/lib/cn";
 import { site, desktopNav, adminNav } from "@/lib/site";
 import { NamedIcon } from "@/components/ui/icon";
 import { useCurrentUser } from "@/app/(app)/user-context";
-import { env } from "@/lib/env";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -41,7 +40,7 @@ export function Sidebar() {
       </nav>
 
       <div className="px-5 py-3 text-[11px] text-[var(--color-text-muted)]">
-        v{site.version}{env.NODE_ENV !== "production" ? " · 开发模式" : ""}
+        v{site.version}{process.env.NODE_ENV !== "production" ? " · 开发模式" : ""}
       </div>
     </aside>
   );
