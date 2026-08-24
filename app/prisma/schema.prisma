@@ -40,6 +40,9 @@ model User {
   chatBaseUrl   String?
   chatApiKey    String?
   chatModel     String?
+  // true 时聊天直接复用生图渠道的 baseUrl/apiKey，不必重复填一遍 key。
+  // 同一平台通常同时提供 images 和 chat/completions 接口。
+  chatUseImageChannel Boolean @default(false)
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 

@@ -63,8 +63,13 @@ test.describe("阶段6 加固", () => {
     await expect(page.getByRole("heading", { name: "Provider 配置" })).toBeVisible({ timeout: 10000 });
     await expect(page.getByLabel("Provider Base URL")).toBeVisible();
     await expect(page.getByLabel("生图模型")).toBeVisible();
-    // 管理员应能看到全局默认配置
-    await expect(page.getByRole("heading", { name: /管理员默认 Provider/ })).toBeVisible();
+    // 全局渠道收进了折叠区（管理员可见），展开后才有输入框。
+    // 用 #admin-base 而不是 getByLabel("API Token")——后者在用户级那块也有一个，会匹配到两个。
+    const globalToggle = page.getByRole("button", { name: /全局默认生图渠道/ });
+    await expect(globalToggle).toBeVisible();
+    await expect(page.locator("#admin-base")).toBeHidden();
+    await globalToggle.click();
+    await expect(page.locator("#admin-base")).toBeVisible();
   });
 
   test("管理员设置页可见清理策略，且展示当前阈值与影响预估", async ({ page }) => {

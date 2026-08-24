@@ -12,11 +12,16 @@ import { z } from "zod";
  * Body 可选传入临时 baseUrl + apiKey（用于保存前先探测）。
  * 如果 body 为空，则按优先级读取已保存的配置。
  *
+ * `scope: "global"` 时只读管理员全局配置（SystemSetting），不回落到用户级——
+ * 管理员在"全局默认"那栏点获取模型时，探测的必须是全局那对值，
+ * 否则会拿自己的用户级配置去探测，结果对不上他正在编辑的渠道。
+ *
  * 调用 OpenAI 兼容的 GET /v1/models 接口。
  */
 const Body = z.object({
   baseUrl: z.string().optional(),
   apiKey: z.string().optional(),
+  scope: z.enum(["user", "global"]).optional(),
 }).optional();
 
 export async function POST(req: NextRequest) {
@@ -30,22 +35,29 @@ export async function POST(req: NextRequest) {
     // 解析 body
     let bodyBaseUrl: string | undefined;
     let bodyApiKey: string | undefined;
+    let scope: "user" | "global" = "user";
     try {
       const json = await req.json();
       const parsed = Body.safeParse(json);
       if (parsed.success && parsed.data) {
         bodyBaseUrl = parsed.data.baseUrl;
         bodyApiKey = parsed.data.apiKey;
+        scope = parsed.data.scope ?? "user";
       }
     } catch {
       // body 为空，忽略
+    }
+
+    if (scope === "global" && user.role !== "ADMIN") {
+      return NextResponse.json({ error: { code: "FORBIDDEN" }, requestId }, { status: 403 });
     }
 
     // 按优先级读取配置
     let baseUrl = bodyBaseUrl ?? "";
     let apiKey = bodyApiKey ?? "";
 
-    if (!baseUrl || !apiKey) {
+    // 只有 user scope 才回落到用户级配置
+    if (scope === "user" && (!baseUrl || !apiKey)) {
       const fullUser = await prisma.user.findUnique({
         where: { id: user.id },
         select: { providerBaseUrl: true, providerApiKey: true },

@@ -14,7 +14,15 @@ export async function GET() {
 
   const fullUser = await prisma.user.findUnique({
     where: { id: user.id },
-    select: { providerBaseUrl: true, providerApiKey: true, providerModel: true, chatBaseUrl: true, chatApiKey: true, chatModel: true },
+    select: {
+      providerBaseUrl: true,
+      providerApiKey: true,
+      providerModel: true,
+      chatBaseUrl: true,
+      chatApiKey: true,
+      chatModel: true,
+      chatUseImageChannel: true,
+    },
   });
 
   // 管理员默认配置
@@ -54,6 +62,7 @@ export async function GET() {
         hasApiKey: !!fullUser?.chatApiKey,
         apiKeyMasked: fullUser?.chatApiKey ? maskApiKey(fullUser.chatApiKey) : "",
         model: fullUser?.chatModel ?? "",
+        useImageChannel: fullUser?.chatUseImageChannel ?? false,
       },
       adminDefault,
       chatAdminDefault,
@@ -72,6 +81,7 @@ const Body = z.object({
   chatApiKey: z.string().max(500).optional(),
   chatModel: z.string().max(100).optional(),
   clearChatApiKey: z.boolean().optional(),
+  chatUseImageChannel: z.boolean().optional(),
 });
 
 /** PUT /api/me/provider — 更新当前用户的 Provider 配置 */
@@ -89,7 +99,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: { code: "INVALID_INPUT" }, requestId }, { status: 400 });
     }
 
-    const data: Record<string, string | null> = {};
+    const data: Record<string, string | boolean | null> = {};
     if (parsed.data.baseUrl !== undefined) data.providerBaseUrl = parsed.data.baseUrl || null;
     if (parsed.data.model !== undefined) data.providerModel = parsed.data.model || null;
     if (parsed.data.apiKey) data.providerApiKey = parsed.data.apiKey;
@@ -100,6 +110,9 @@ export async function PUT(req: NextRequest) {
     if (parsed.data.chatModel !== undefined) data.chatModel = parsed.data.chatModel || null;
     if (parsed.data.chatApiKey) data.chatApiKey = parsed.data.chatApiKey;
     if (parsed.data.clearChatApiKey) data.chatApiKey = null;
+    if (parsed.data.chatUseImageChannel !== undefined) {
+      data.chatUseImageChannel = parsed.data.chatUseImageChannel;
+    }
 
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ error: { code: "INVALID_INPUT", message: "无更新字段" }, requestId }, { status: 400 });
