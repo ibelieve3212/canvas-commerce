@@ -67,19 +67,19 @@ canvas-commerce/
 镜像由 GitHub Actions 构建双架构（amd64 + arm64）后推到 GHCR，部署机只拉不构建。
 镜像地址 `ghcr.io/ibelieve3212/canvas-commerce:latest`，压缩体积 amd64 81.2MB / arm64 82.0MB。
 
-**方式一：`docker run`（无需 docker-compose）**
+**方式一：`docker run`**
+
+只需一项必填：`AUTH_SECRET`（会话 cookie 签名密钥）。下面用 `openssl` 生成一个
+并直接在同一个 shell 里启动：
 
 ```bash
-# 1. 拉镜像
+# 拉镜像
 docker pull ghcr.io/ibelieve3212/canvas-commerce:latest
 
-# 2. 创建数据卷（数据库 + 用户上传/生成的图片全在里面）
-docker volume create canvas-data
-
-# 3. 生成密钥
+# 生成密钥（只在当前 shell 会话里生效，下面那行命令会引用它）
 AUTH_SECRET=$(openssl rand -base64 32)
 
-# 4. 启动
+# 启动
 docker run -d \
   --name canvas-commerce \
   --restart unless-stopped \
@@ -92,15 +92,29 @@ docker run -d \
 首次启动会自动建库、跑 migration、创建管理员（`admin / admin123`），
 看到 `[entrypoint] 就绪` 与 `[worker] 启动` 即成功。**登录后立刻改密码。**
 
-上面的命令已经是最小可用版本。镜像内置了 healthcheck，`APP_URL` 和
-`GENERATION_PROVIDER` 不传时会用默认值（`http://localhost:3000` 和 `mock`）。
-需要改的话加 `-e KEY=VALUE` 即可，全部变量见 `.env.docker.example`。
+> 关于 `AUTH_SECRET`：上面把它存进了 shell 变量供下一条命令引用。
+> 如果你不在同一个 shell 里连续跑（比如手动拼命令），把 `$AUTH_SECRET` 换成
+> 你生成的那个字符串即可，例如 `-e AUTH_SECRET="PtgM...igw="`。
+> 更新镜像重新 `docker run` 时**要用同一个值**，否则旧会话全部失效。
 
-常用可选项：
+**数据存在哪**：上面的 `-v canvas-data:/app/.data` 用的是 Docker 具名 volume，
+数据库和用户图片都存在里面。这是推荐做法——容器内以非 root 用户运行，
+具名 volume 能自动处理权限。如果想把数据放到指定路径（方便直接备份/管理），
+把 `-v canvas-data:/app/.data` 换成绑定挂载：
+
+```bash
+mkdir -p /你的路径                    # 先建好目录
+chown -R 1000:1000 /你的路径           # 容器内 node 用户 uid 是 1000
+# 启动时把 -v 换成：
+#   -v /你的路径:/app/.data
+```
+
+⚠️ 绑定挂载必须先 `chown 1000:1000`，否则容器内写不进去（报 `Permission denied`）。
+
+其余可选项：
 - 只绑本机访问（不对外暴露）：把 `-p 3000:3000` 改成 `-p 127.0.0.1:3000:3000`
-- 自定义数据目录（方便直接备份/管理文件）：把 `-v canvas-data:/app/.data`
-  换成 `-v /你的路径:/app/.data`
-- 2GB 内存小机器加 `--memory=1500m` 限制容器内存
+- 2GB 内存小机器加 `--memory=1500m`
+- 其他环境变量（Provider、配额、清理策略等）用 `-e KEY=VALUE` 传，全部变量见 `.env.docker.example`
 
 更新到新版本：
 
