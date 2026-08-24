@@ -327,7 +327,7 @@ model QuotaReservation {
   settledAt     DateTime?
 
   user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  batch GenerationBatch @relation(fields: [batchId], references: [id])
+  batch GenerationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([status])

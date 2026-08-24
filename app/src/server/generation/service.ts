@@ -206,7 +206,16 @@ function computeOutputRoles(
 
 export async function recomputeBatchStatus(batchId: string): Promise<void> {
   const jobs = await prisma.generationJob.findMany({ where: { batchId } });
-  if (jobs.length === 0) return;
+
+  // Job 被删光（用户删了批次里最后一张图）。此时不能直接 return——
+  // 那会让批次停留在删除前的旧计数，任务页显示"1/1 成功"却一张图都打不开。
+  if (jobs.length === 0) {
+    await prisma.generationBatch.updateMany({
+      where: { id: batchId },
+      data: { succeededCount: 0, failedCount: 0, canceledCount: 0 },
+    });
+    return;
+  }
 
   const succeeded = jobs.filter((j) => j.status === "succeeded").length;
   const failed = jobs.filter((j) => j.status === "failed").length;
