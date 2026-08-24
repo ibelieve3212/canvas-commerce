@@ -31,7 +31,7 @@ export const posterApp: Application = {
     { type: "textarea", key: "copy", label: "图片文案", required: false, placeholder: "例：限时特惠，留空则由 AI 自动生成", maxLength: 500, defaultValue: "", group: "高级要求" },
   ],
   promptTemplate:
-    "{{ref_images}}营销海报，商品 {{name}}，风格 {{style}}，背景 {{background}}，比例 {{aspect}}，构图随机 {{layout_random}}。卖点 {{selling_points}}，目标人群 {{audience}}，补充 {{extra}}。{{copy_directive}}。生成统一视觉系列的海报，保留排版安全区。",
-  templateVersion: 1,
+    "{{ref_images}}营销海报，商品 {{name}}，风格 {{style}}，背景 {{background}}，比例 {{aspect}}，构图随机 {{layout_random}}。目标人群 {{audience}}，补充 {{extra}}。{{copy_directive}}。{{output_directive}}{{point_directive}}保留排版安全区。",
+  templateVersion: 2,
   isPublished: true,
 };

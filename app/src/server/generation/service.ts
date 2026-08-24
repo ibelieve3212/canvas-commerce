@@ -10,7 +10,7 @@ import { ProviderError } from "@/server/provider/types";
 import type { ProviderReferenceImage } from "@/server/provider/types";
 import { throttleProviderRequest, markProviderRequestComplete } from "@/server/provider/throttle";
 import { env } from "@/lib/env";
-import { composePrompt, validateFormValues, applyCopyPriority } from "@/contracts/generation";
+import { composePrompt, validateFormValues, applyCopyPriority, buildOutputDirective, buildPointDirective } from "@/contracts/generation";
 import type { Application } from "@/contracts/application";
 import type { FormValues } from "@/contracts/generation";
 import { getApplicationById } from "@/server/applications/seed";
@@ -90,7 +90,6 @@ export async function createBatch(
   const roles = computeOutputRoles(app, input.requestedCount);
   // OPT-1: 文案优先级包装 — 注入 copy_directive 后再走 composePrompt
   const valuesWithCopy = applyCopyPriority(input.formValues);
-  const prompt = composePrompt(app.promptTemplate, valuesWithCopy, input.referenceImages);
 
   const inputSnapshot = {
     applicationId: input.applicationId,
@@ -136,6 +135,21 @@ export async function createBatch(
     });
 
     for (const role of roles) {
+      // prompt 必须逐张算：composePrompt 要吃 output_directive（本张定位）
+      // 和 point_directive（海报轮转到的那条卖点）。此前它在循环外只算一次，
+      // N 个 Job 拿到逐字相同的字符串，outputRole 从未进过 prompt——
+      // 于是详情页 6 张全做成首屏、主图 5 张全做成吸睛图。
+      const perOutputValues = {
+        ...valuesWithCopy,
+        output_directive: buildOutputDirective(role, roles.length),
+        point_directive: buildPointDirective(valuesWithCopy, role, roles.length),
+      };
+      const prompt = composePrompt(
+        app.promptTemplate,
+        perOutputValues,
+        input.referenceImages,
+      );
+
       await tx.generationJob.create({
         data: {
           batchId: b.id,
@@ -192,13 +206,19 @@ function computeOutputRoles(
   count: number,
 ): Array<{ outputIndex: number; outputRole: string; title: string; description: string }> {
   if (app.outputRoles.length > 0) {
-    return app.outputRoles.slice(0, count).map((r) => ({ ...r }));
+    return app.outputRoles.slice(0, count).map((r) => ({ ...r, description: r.description ?? "" }));
   }
+  // 未声明 outputRoles 的应用（海报、买家秀）：海报按卖点轮转，
+  // role 名用 point_ 前缀让 buildPointDirective 认领；买家秀无卖点概念，
+  // 靠 buildOutputDirective 的通用差异化约束避免多张雷同。
+  const isPoster = app.kind === "POSTER";
   return Array.from({ length: count }, (_, i) => ({
     outputIndex: i + 1,
-    outputRole: `output_${i + 1}`,
-    title: `${app.name} ${i + 1}`,
-    description: "",
+    outputRole: isPoster ? `point_${i + 1}` : `variant_${i + 1}`,
+    title: isPoster ? `卖点海报 ${i + 1}` : `${app.name} ${i + 1}`,
+    description: isPoster
+      ? "围绕分配到的单个卖点做画面主体"
+      : "与同组其它张在构图、机位、光线上明显区分开",
   }));
 }
 

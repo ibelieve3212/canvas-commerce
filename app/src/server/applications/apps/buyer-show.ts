@@ -35,7 +35,7 @@ export const buyerShowApp: Application = {
     { type: "text", key: "extra", label: "补充要求", required: false, placeholder: "其它特殊要求", maxLength: 200, defaultValue: "", group: "高级要求" },
   ],
   promptTemplate:
-    "{{ref_images}}买家秀，商品 {{name}}，类目 {{category}}，渠道 {{channel}}，影像风格 {{image_style}}，比例 {{aspect}}，人物露出 {{person_visibility}}，真实度 {{realism}}，场景 {{scene}}，目标人群 {{audience}}。补充 {{extra}}{{#if lock_scale}}，锁定商品在人物上的佩戴比例，保持真实尺度{{/if}}。生成自然真实感的买家秀照片。",
-  templateVersion: 1,
+    "{{ref_images}}买家秀，商品 {{name}}，类目 {{category}}，渠道 {{channel}}，影像风格 {{image_style}}，比例 {{aspect}}，人物露出 {{person_visibility}}，真实度 {{realism}}，场景 {{scene}}，目标人群 {{audience}}。补充 {{extra}}{{#if lock_scale}}，锁定商品在人物上的佩戴比例，保持真实尺度{{/if}}。{{output_directive}}生成自然真实感的买家秀照片。",
+  templateVersion: 2,
   isPublished: true,
 };

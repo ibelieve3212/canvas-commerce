@@ -41,7 +41,7 @@ export const mainImageApp: Application = {
     { type: "checkbox", key: "reference_layout", label: "同款参考版式", required: false, defaultValue: false, group: "高级要求" },
   ],
   promptTemplate:
-    "{{ref_images}}电商主图首图，商品 {{name}}（{{category}}），平台 {{platform}}，市场 {{market}}，语言 {{language}}，风格 {{style}}。商品信息：{{info}}。目标人群 {{audience}}，价格定位 {{price}}。补充：{{extra}}{{#if reference_layout}}，忽略风格选择，以已上传图片素材中“风格/版式参考图”实际风格基调为准生成主图，商品使用商品图中的商品{{/if}。{{copy_directive}}。生成高点击率、有视觉冲击力的吸睛主图，突出商品最佳角度和核心卖点。",
-  templateVersion: 1,
+    "{{ref_images}}电商主图，商品 {{name}}（{{category}}），平台 {{platform}}，市场 {{market}}，语言 {{language}}，风格 {{style}}。商品信息：{{info}}。目标人群 {{audience}}，价格定位 {{price}}。补充：{{extra}}{{#if reference_layout}}，忽略风格选择，以已上传图片素材中“风格/版式参考图”实际风格基调为准生成主图，商品使用商品图中的商品{{/if}}。{{copy_directive}}。{{output_directive}}突出商品最佳角度，画面干净可直接发布。",
+  templateVersion: 2,
   isPublished: true,
 };
