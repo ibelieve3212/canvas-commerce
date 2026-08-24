@@ -372,6 +372,21 @@ export async function processJob(jobId: string): Promise<void> {
       result.mimeType,
     );
 
+    // 调 Provider 期间用户可能已经删掉了整个批次（Job 被外键 Cascade 带走）。
+    // 此时若照常写库，asset.create 会外键违约、随后的 job.update 抛 P2025，
+    // 日志刷一片错误堆栈，而刚落盘的图片文件永远没人回收。
+    // 删除是用户的明确意图，这里安静地清掉产物即可，不该报错。
+    const stillAlive = await prisma.generationJob.findUnique({
+      where: { id: jobId },
+      select: { id: true },
+    });
+    if (!stillAlive) {
+      console.log(`[worker] job ${jobId} 在生成期间已被删除，丢弃产物`);
+      await storage.delete(objectKey).catch(() => {});
+      if (thumbnailKey) await storage.delete(thumbnailKey).catch(() => {});
+      return;
+    }
+
     await prisma.asset.create({
       data: {
         userId: job.batch.userId,
@@ -391,7 +406,7 @@ export async function processJob(jobId: string): Promise<void> {
       },
     });
 
-    await prisma.generationJob.update({
+    await prisma.generationJob.updateMany({
       where: { id: jobId },
       data: {
         status: "succeeded",
@@ -407,13 +422,19 @@ export async function processJob(jobId: string): Promise<void> {
     // Provider 调用失败也计节流时间（请求可能已到达 Provider）
     markProviderRequestComplete();
 
-    await prisma.generationJob.update({
+    // 用 updateMany：Job 可能在生成期间已被删除（用户删了批次）。
+    // update 会抛 P2025 冲出 catch，把一次正常的用户操作变成 worker 错误。
+    const marked = await prisma.generationJob.updateMany({
       where: { id: jobId },
       data: { status: "failed", completedAt: new Date(), errorCode: code, errorMessage: message },
     });
+    if (marked.count === 0) {
+      console.log(`[worker] job ${jobId} 在生成期间已被删除，跳过失败标记`);
+      return;
+    }
 
     if (retryable && job.attempt < 2) {
-      await prisma.generationJob.update({ where: { id: jobId }, data: { status: "queued" } });
+      await prisma.generationJob.updateMany({ where: { id: jobId }, data: { status: "queued" } });
       const queue = getQueue();
       await queue.enqueue(jobId, { batchId: job.batchId, jobId });
     }
