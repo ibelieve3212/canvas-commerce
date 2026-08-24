@@ -7,6 +7,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Eye, EyeOff, Save, Shield, Server, Trash2, Key, RefreshCw, MessageCircle, Copy } from "lucide-react";
 
 interface ProviderData {
@@ -97,6 +98,10 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
   const [cleanupMax, setCleanupMax] = React.useState("300");
   const [cleanupMeta, setCleanupMeta] = React.useState<CleanupPolicyData | null>(null);
   const [savingCleanup, setSavingCleanup] = React.useState(false);
+  /** 已算出影响面、等管理员确认的待保存策略 */
+  const [pendingCleanup, setPendingCleanup] = React.useState<
+    { days: number; max: number; impact: CleanupImpact } | null
+  >(null);
 
    
   React.useEffect(() => {
@@ -135,6 +140,7 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
     }
   }, [isAdmin]);
 
+  /** 第一步：校验 + 算影响面，拿到结果后弹确认。真正的保存在 confirmSaveCleanup。 */
   async function handleSaveCleanup() {
     const days = Number.parseInt(cleanupDays, 10);
     const max = Number.parseInt(cleanupMax, 10);
@@ -164,24 +170,28 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
         showToast("error", previewJson.error?.message || "校验失败");
         return;
       }
+      setPendingCleanup({ days, max, impact: previewJson.data.impact as CleanupImpact });
+    } catch {
+      showToast("error", "网络错误");
+    } finally {
+      setSavingCleanup(false);
+    }
+  }
 
-      const impact = previewJson.data.impact as CleanupImpact;
-      const totalDelete = impact.assets.willDelete + impact.uploads.willDelete;
-      const detail =
-        `保留 ${days} 天，每用户最多 ${max} 张（资产、上传图各自计算）。\n\n` +
-        `按此设置，下次清理将删除：\n` +
-        `・资产 ${impact.assets.willDelete} / ${impact.assets.total} 张\n` +
-        `・上传图 ${impact.uploads.willDelete} / ${impact.uploads.total} 张\n\n` +
-        (totalDelete > 0
-          ? "文件将从服务器永久删除，不可恢复（收藏图片不豁免）。\n确定保存并立即执行吗？"
-          : "当前无需删除任何内容。确定保存吗？");
-
-      if (!confirm(detail)) return;
-
+  /** 第二步：管理员在确认弹窗点了「保存并执行」。 */
+  async function confirmSaveCleanup() {
+    const pending = pendingCleanup;
+    if (!pending) return;
+    setSavingCleanup(true);
+    try {
       const res = await fetch("/api/admin/cleanup-policy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ retentionDays: days, maxItemsPerUser: max, runNow: true }),
+        body: JSON.stringify({
+          retentionDays: pending.days,
+          maxItemsPerUser: pending.max,
+          runNow: true,
+        }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -193,6 +203,7 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
         ? cleaned.expiredAssets + cleaned.excessAssets + cleaned.expiredUploads + cleaned.excessUploads
         : 0;
       showToast("success", `清理策略已保存，本次已删除 ${deleted} 项`);
+      setPendingCleanup(null);
 
       // 重拉一次，刷新影响预估
       const refreshed = await fetch("/api/admin/cleanup-policy").then(r => r.json());
@@ -835,6 +846,48 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
           </section>
         )}
       </div>
+
+      {/* 清理策略确认。数字来自 preview 接口，与 worker 实际执行同源。 */}
+      <ConfirmDialog
+        open={pendingCleanup !== null}
+        title="确认清理策略"
+        description={
+          pendingCleanup && (
+            <>
+              <p className="mb-2">
+                保留 {pendingCleanup.days} 天，每用户最多 {pendingCleanup.max} 张
+                （资产、上传图各自计算）。
+              </p>
+              <p className="mb-1">按此设置，下次清理将删除：</p>
+              <ul className="mb-2 list-inside list-disc">
+                <li>
+                  资产{" "}
+                  <strong className="text-[var(--color-danger)]">
+                    {pendingCleanup.impact.assets.willDelete}
+                  </strong>{" "}
+                  / {pendingCleanup.impact.assets.total} 张
+                </li>
+                <li>
+                  上传图{" "}
+                  <strong className="text-[var(--color-danger)]">
+                    {pendingCleanup.impact.uploads.willDelete}
+                  </strong>{" "}
+                  / {pendingCleanup.impact.uploads.total} 张
+                </li>
+              </ul>
+              <p>
+                {pendingCleanup.impact.assets.willDelete + pendingCleanup.impact.uploads.willDelete > 0
+                  ? "文件将从服务器永久删除，不可恢复（收藏图片不豁免）。"
+                  : "当前无需删除任何内容。"}
+              </p>
+            </>
+          )
+        }
+        confirmLabel="保存并执行"
+        loading={savingCleanup}
+        onConfirm={confirmSaveCleanup}
+        onCancel={() => setPendingCleanup(null)}
+      />
     </>
   );
 }

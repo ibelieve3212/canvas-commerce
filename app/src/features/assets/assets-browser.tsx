@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Star, Trash2, Loader2, ChevronLeft, ChevronRight, X, Download } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { HoverPreview } from "@/features/generation/hover-preview";
@@ -24,6 +25,8 @@ interface AssetItem {
   isFavorite: boolean;
   createdAt: string;
   job: AssetJob | null;
+  /** 微调后代数量，删除确认要提示会连带删掉几张 */
+  descendantCount: number;
 }
 
 interface AssetListResponse {
@@ -44,6 +47,7 @@ export function AssetsBrowser() {
   const [page, setPage] = React.useState(1);
   const [previewAsset, setPreviewAsset] = React.useState<AssetItem | null>(null);
   const [actionLoading, setActionLoading] = React.useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = React.useState<AssetItem | null>(null);
 
   const fetchData = React.useCallback(async () => {
     setLoading(true);
@@ -73,14 +77,16 @@ export function AssetsBrowser() {
     finally { setActionLoading(null); }
   }
 
-  async function handleDelete(assetId: string) {
-    if (!confirm("确定删除这张图片吗？\n该操作不可恢复，文件将从服务器永久删除。")) return;
-    setActionLoading(`del-${assetId}`);
+  async function handleDelete() {
+    const asset = pendingDelete;
+    if (!asset) return;
+    setActionLoading(`del-${asset.id}`);
     try {
-      const res = await fetch(`/api/assets/${assetId}`, { method: "DELETE" });
+      const res = await fetch(`/api/assets/${asset.id}`, { method: "DELETE" });
       const json = await res.json();
       if (!res.ok) { showToast("error", json.error?.message || "删除失败"); return; }
-      showToast("success", "图片已永久删除");
+      showToast("success", `已永久删除 ${json.data.deletedCount} 张图片`);
+      setPendingDelete(null);
       fetchData();
     } catch { showToast("error", "网络错误"); }
     finally { setActionLoading(null); }
@@ -187,8 +193,9 @@ export function AssetsBrowser() {
                 </button>
                 <button
                   type="button"
+                  aria-label="删除图片"
                   disabled={actionLoading === `del-${asset.id}`}
-                  onClick={() => handleDelete(asset.id)}
+                  onClick={() => setPendingDelete(asset)}
                   className="grid size-7 place-items-center rounded-full bg-black/50 text-white hover:bg-[var(--color-danger)]"
                 >
                   <Trash2 className="size-3.5" />
@@ -278,6 +285,25 @@ export function AssetsBrowser() {
           </div>
         </div>
       )}
+      {/* 删除确认。有微调子图时明确提示会连带删几张（OPT-2 第一节的两种提示语） */}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="确认删除图片"
+        description={
+          pendingDelete && pendingDelete.descendantCount > 0 ? (
+            <>
+              该图有 <strong className="text-[var(--color-danger)]">{pendingDelete.descendantCount}</strong> 张微调版本，
+              将一并永久删除（共 {pendingDelete.descendantCount + 1} 张），且不可恢复。
+            </>
+          ) : (
+            "该操作不可恢复，文件将从服务器永久删除。"
+          )
+        }
+        confirmLabel="永久删除"
+        loading={actionLoading === `del-${pendingDelete?.id}`}
+        onConfirm={handleDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

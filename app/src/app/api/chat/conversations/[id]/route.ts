@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/session";
 import { prisma } from "@/server/db/client";
-import { getStorage } from "@/server/storage/adapter";
+import { deleteConversation } from "@/server/deletion/service";
 
 /** GET /api/chat/conversations/[id] — 获取会话消息列表 */
 export async function GET(
@@ -77,21 +77,8 @@ export async function DELETE(
     return NextResponse.json({ error: { code: "FORBIDDEN" }, requestId }, { status: 403 });
   }
 
-  // 删贴图文件
-  const messagesWithImages = await prisma.chatMessage.findMany({
-    where: { conversationId: id, imageObjectKey: { not: null } },
-    select: { imageObjectKey: true },
-  });
-
-  const storage = getStorage();
-  for (const m of messagesWithImages) {
-    if (m.imageObjectKey) {
-      await storage.delete(m.imageObjectKey).catch(() => {});
-    }
-  }
-
-  // 删数据库记录（级联删消息）
-  await prisma.chatConversation.delete({ where: { id } });
+  // 删会话 + 消息 + 贴图文件，走统一删除层
+  await deleteConversation(id);
 
   return NextResponse.json({ data: { ok: true }, requestId });
 }

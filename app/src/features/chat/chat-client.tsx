@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Plus, Send, Trash2, MessageCircle, Loader2, Image as ImageIcon, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -31,6 +32,8 @@ export function ChatClient() {
   const [waiting, setWaiting] = React.useState(false);
   const [loadingConv, setLoadingConv] = React.useState(false);
   const [pendingImage, setPendingImage] = React.useState<{ base64: string; mimeType: string; preview: string } | null>(null);
+  const [pendingDelete, setPendingDelete] = React.useState<Conversation | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -86,18 +89,25 @@ export function ChatClient() {
   }
 
   // 删除会话
-  async function handleDeleteConversation(id: string) {
-    if (!confirm("确定删除这个会话吗？所有消息和贴图将永久删除。")) return;
-    const res = await fetch(`/api/chat/conversations/${id}`, { method: "DELETE" });
-    if (!res.ok) {
-      showToast("error", "删除失败");
-      return;
-    }
-    showToast("success", "会话已删除");
-    setConversations((prev) => prev.filter((c) => c.id !== id));
-    if (currentId === id) {
-      setCurrentId(null);
-      setMessages([]);
+  async function handleDeleteConversation() {
+    const conv = pendingDelete;
+    if (!conv) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/chat/conversations/${conv.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        showToast("error", "删除失败");
+        return;
+      }
+      showToast("success", "会话已删除");
+      setConversations((prev) => prev.filter((c) => c.id !== conv.id));
+      setPendingDelete(null);
+      if (currentId === conv.id) {
+        setCurrentId(null);
+        setMessages([]);
+      }
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -255,7 +265,7 @@ export function ChatClient() {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleDeleteConversation(conv.id);
+                  setPendingDelete(conv);
                 }}
                 className="opacity-0 transition-opacity group-hover:opacity-100"
                 aria-label="删除会话"
@@ -411,6 +421,16 @@ export function ChatClient() {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="确认删除会话"
+        description="该会话的所有消息和贴图将永久删除，且不可恢复。"
+        confirmLabel="永久删除"
+        loading={deleting}
+        onConfirm={handleDeleteConversation}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

@@ -90,7 +90,7 @@ test.describe("阶段4 任务和资产", () => {
     await expect(page.getByRole("button", { name: /已收藏|取消收藏/ }).first()).toBeVisible({ timeout: 10000 });
   });
 
-  test("可软删除任务", async ({ page }) => {
+  test("可彻底删除任务", async ({ page }) => {
     await page.goto("/apps/main-image");
     await page.getByLabel("商品名").fill("删除测试");
     await page.getByLabel("类目").fill("数码");
@@ -101,12 +101,47 @@ test.describe("阶段4 任务和资产", () => {
     await page.getByRole("button", { name: /生成 1 张/ }).click();
     await expect(page.getByText(/完成 \d\/1/)).toBeVisible({ timeout: 15000 });
 
+    // 断言走接口而不是数页面卡片：列表按 12 条分页，删一条会有下一条补位，
+    // 卡片数量根本不变（旧用例正是靠一个恒真断言掩盖了批次删除 500）
+    const before = await (await page.request.get("/api/batches?page=1&pageSize=12")).json();
+    const target = before.data.items[0];
+    expect(target).toBeTruthy();
+
     await page.goto("/tasks");
-    await expect(page.locator("text=商品主图").first()).toBeVisible({ timeout: 5000 });
-    const deleteBtn = page.getByRole("button", { name: /删除/ }).first();
-    await deleteBtn.click();
-    await page.reload();
-    await expect(page.getByText("删除测试")).not.toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("button", { name: "删除批次" }).first()).toBeVisible({ timeout: 5000 });
+
+    // 列表与接口同为 createdAt desc，第一个按钮对应 items[0]
+    await page.getByRole("button", { name: "删除批次" }).first().click();
+
+    // 二次确认改成了自定义对话框（原生 confirm 会被 Playwright 自动 dismiss，
+    // 旧用例因此静默空跑）。这里要真的点确认按钮。
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    const deleted = page.waitForResponse(
+      (r) => r.request().method() === "DELETE" && r.url().includes(`/api/batches/${target.id}`),
+    );
+    await dialog.getByRole("button", { name: "永久删除" }).click();
+    expect((await deleted).status()).toBe(200);
+
+    const after = await (await page.request.get("/api/batches?page=1&pageSize=12")).json();
+    expect(after.data.total).toBe(before.data.total - 1);
+    expect(after.data.items.some((b: { id: string }) => b.id === target.id)).toBe(false);
+  });
+
+  test("取消确认则不删除", async ({ page }) => {
+    const before = await (await page.request.get("/api/batches?page=1&pageSize=12")).json();
+    expect(before.data.items.length).toBeGreaterThan(0);
+
+    await page.goto("/tasks");
+    await page.getByRole("button", { name: "删除批次" }).first().click();
+
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "取消" }).click();
+    await expect(dialog).toBeHidden();
+
+    const after = await (await page.request.get("/api/batches?page=1&pageSize=12")).json();
+    expect(after.data.total).toBe(before.data.total);
   });
 
   test("可恢复配置到生成器", async ({ page }) => {

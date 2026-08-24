@@ -5,9 +5,10 @@ import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { HoverPreview } from "@/features/generation/hover-preview";
 import { cn } from "@/lib/cn";
-import { Trash2, Loader2, ChevronLeft, ChevronRight, HardDrive, AlertTriangle, Check } from "lucide-react";
+import { Trash2, Loader2, ChevronLeft, ChevronRight, HardDrive, Check } from "lucide-react";
 
 interface AdminAssetItem {
   id: string;
@@ -79,7 +80,6 @@ export default function AdminStoragePage() {
 
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
-  const [confirmText, setConfirmText] = React.useState("");
   const [deleting, setDeleting] = React.useState(false);
 
   // 实际生效的天数筛选：预设 > 自定义
@@ -139,10 +139,6 @@ export default function AdminStoragePage() {
   }
 
   async function handleDelete() {
-    if (confirmText !== "删除") {
-      showToast("error", "请输入“删除”二字以确认");
-      return;
-    }
     const ids = [...selected];
     if (ids.length === 0) return;
     setDeleting(true);
@@ -159,7 +155,6 @@ export default function AdminStoragePage() {
       }
       showToast("success", `已永久删除 ${json.data.deletedCount} 项`);
       setShowDeleteConfirm(false);
-      setConfirmText("");
       setSelected(new Set());
       await fetchData();
     } catch {
@@ -417,53 +412,23 @@ export default function AdminStoragePage() {
         </div>
       )}
 
-      {/* 删除确认弹窗 */}
-      {showDeleteConfirm && (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"
-          onClick={() => setShowDeleteConfirm(false)}
-        >
-          <div
-            className="w-full max-w-md rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-3 flex items-center gap-2">
-              <AlertTriangle className="size-5 text-[var(--color-danger)]" />
-              <h3 className="text-sm font-semibold text-[var(--color-text)]">确认批量删除</h3>
-            </div>
-            <p className="mb-3 text-sm text-[var(--color-text-muted)]">
-              将永久删除 <strong className="text-[var(--color-danger)]">{selectedCount}</strong> 项资产
-              （含其微调子树与文件），不可恢复。
-              {effectiveDays && ` 筛选条件：${effectiveDays} 天前。`}
-            </p>
-            <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-              请输入“删除”二字以确认：
-            </p>
-            <input
-              type="text"
-              value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
-              placeholder="删除"
-              className="mb-4 h-9 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)]"
-              autoFocus
-            />
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => { setShowDeleteConfirm(false); setConfirmText(""); }}>
-                取消
-              </Button>
-              <Button
-                variant="danger"
-                size="sm"
-                loading={deleting}
-                disabled={confirmText !== "删除"}
-                onClick={handleDelete}
-              >
-                <Trash2 className="mr-1 size-4" /> 永久删除
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 删除确认。影响面可达数百项，要求逐字输入才能确认。 */}
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="确认批量删除"
+        description={
+          <>
+            将永久删除 <strong className="text-[var(--color-danger)]">{selectedCount}</strong> 项资产
+            （含其微调子树与文件），不可恢复。
+            {effectiveDays ? ` 筛选条件：${effectiveDays} 天前。` : ""}
+          </>
+        }
+        confirmLabel="永久删除"
+        requireTypedText="删除"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </>
   );
 }

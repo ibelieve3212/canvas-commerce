@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Ban, Trash2, Repeat, Loader2, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { HoverPreview } from "@/features/generation/hover-preview";
@@ -72,6 +73,8 @@ export function TasksBrowser() {
   const [page, setPage] = React.useState(1);
   const [expandedBatch, setExpandedBatch] = React.useState<string | null>(null);
   const [actionLoading, setActionLoading] = React.useState<string | null>(null);
+  const [pendingCancel, setPendingCancel] = React.useState<BatchItem | null>(null);
+  const [pendingDelete, setPendingDelete] = React.useState<BatchItem | null>(null);
 
   const fetchData = React.useCallback(async () => {
     setLoading(true);
@@ -86,27 +89,31 @@ export function TasksBrowser() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   React.useEffect(() => { fetchData(); }, [fetchData]);
 
-  async function handleCancel(batchId: string) {
-    if (!confirm("确认取消此批次？取消后未完成的任务将停止生成。")) return;
-    setActionLoading(`cancel-${batchId}`);
+  async function handleCancel() {
+    const batch = pendingCancel;
+    if (!batch) return;
+    setActionLoading(`cancel-${batch.id}`);
     try {
-      const res = await fetch(`/api/batches/${batchId}`, { method: "PATCH" });
+      const res = await fetch(`/api/batches/${batch.id}`, { method: "PATCH" });
       const json = await res.json();
       if (!res.ok) { showToast("error", json.error?.message || "取消失败"); return; }
       showToast("success", "批次已取消");
+      setPendingCancel(null);
       fetchData();
     } catch { showToast("error", "网络错误"); }
     finally { setActionLoading(null); }
   }
 
-  async function handleDelete(batchId: string) {
-    if (!confirm("确定删除这个生成任务吗？\n该任务下所有图片（含微调版本）的文件将从服务器永久删除，且不可恢复。")) return;
-    setActionLoading(`delete-${batchId}`);
+  async function handleDelete() {
+    const batch = pendingDelete;
+    if (!batch) return;
+    setActionLoading(`delete-${batch.id}`);
     try {
-      const res = await fetch(`/api/batches/${batchId}`, { method: "DELETE" });
+      const res = await fetch(`/api/batches/${batch.id}`, { method: "DELETE" });
       const json = await res.json();
       if (!res.ok) { showToast("error", json.error?.message || "删除失败"); return; }
       showToast("success", "批次已永久删除");
+      setPendingDelete(null);
       fetchData();
     } catch { showToast("error", "网络错误"); }
     finally { setActionLoading(null); }
@@ -208,7 +215,7 @@ export function TasksBrowser() {
                         type="button"
                         aria-label="取消批次"
                         disabled={actionLoading === `cancel-${batch.id}`}
-                        onClick={() => handleCancel(batch.id)}
+                        onClick={() => setPendingCancel(batch)}
                         className="grid size-7 place-items-center rounded text-[var(--color-text-muted)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-danger)]"
                       >
                         {actionLoading === `cancel-${batch.id}` ? <Loader2 className="size-4 animate-spin" /> : <Ban className="size-4" />}
@@ -233,7 +240,7 @@ export function TasksBrowser() {
                       type="button"
                       aria-label="删除批次"
                       disabled={actionLoading === `delete-${batch.id}`}
-                      onClick={() => handleDelete(batch.id)}
+                      onClick={() => setPendingDelete(batch)}
                       className="grid size-7 place-items-center rounded text-[var(--color-text-muted)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-danger)]"
                     >
                       {actionLoading === `delete-${batch.id}` ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
@@ -304,6 +311,27 @@ export function TasksBrowser() {
           </button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingCancel !== null}
+        title="确认取消批次"
+        description="取消后未完成的任务将停止生成，未产出的额度会退回。已生成的图片保留。"
+        confirmLabel="取消批次"
+        cancelLabel="返回"
+        loading={actionLoading === `cancel-${pendingCancel?.id}`}
+        onConfirm={handleCancel}
+        onCancel={() => setPendingCancel(null)}
+      />
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="确认删除任务"
+        description="该任务下所有图片（含微调版本）的文件将从服务器永久删除，且不可恢复。"
+        confirmLabel="永久删除"
+        loading={actionLoading === `delete-${pendingDelete?.id}`}
+        onConfirm={handleDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }
