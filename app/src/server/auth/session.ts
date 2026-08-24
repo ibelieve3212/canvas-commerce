@@ -4,7 +4,7 @@
  * - cookie 存 session token，HttpOnly + SameSite=Lax
  * - sessionVersion：停用/重置密码后递增，旧 session 失效
  */
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { prisma } from "@/server/db/client";
 import argon2 from "argon2";
 import { env } from "@/lib/env";
@@ -62,10 +62,27 @@ export async function setSessionCookie(token: string) {
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: env.NODE_ENV === "production",
+    // 只在 HTTPS 下带 Secure。原来用 NODE_ENV === "production" 判断，
+    // 假设生产一定走 HTTPS（通常有反代做 TLS）。但直接 HTTP 部署时
+    // （如 http://192.168.x.x:3000），浏览器会直接丢弃 Secure cookie，
+    // 导致登录看似成功但下一个请求就变未登录。改成看实际协议：
+    // APP_URL 是 https:// 或反代设了 x-forwarded-proto: https 才带 Secure。
+    secure: await isHttpsRequest(),
     path: "/",
     maxAge: SESSION_TTL_MS / 1000,
   });
+}
+
+/**
+ * 判断当前请求是否走 HTTPS。两种情况算 HTTPS：
+ * 1. 反向代理设了 `x-forwarded-proto: https`（标准做法）
+ * 2. APP_URL 配成 `https://...`（没设反代头时的兜底判断）
+ */
+async function isHttpsRequest(): Promise<boolean> {
+  const headersList = await headers();
+  const forwardedProto = headersList.get("x-forwarded-proto");
+  if (forwardedProto) return forwardedProto === "https";
+  return env.APP_URL.startsWith("https://");
 }
 
 export async function clearSessionCookie() {
