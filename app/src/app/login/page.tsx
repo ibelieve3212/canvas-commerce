@@ -69,7 +69,7 @@ function LoginForm() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="admin"
+                placeholder={process.env.NODE_ENV !== "production" ? "admin" : ""}
                 required
                 autoComplete="username"
                 autoCapitalize="none"

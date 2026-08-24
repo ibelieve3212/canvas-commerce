@@ -108,7 +108,10 @@ function pathnameToBreadcrumb(pathname: string) {
     href += "/" + seg;
     const isLast = i === segments.length - 1;
     const label = labelMap[seg] || seg;
-    result.push(isLast ? { label } : { label, href });
+    // /admin 没有自己的页面，只有 /admin/users 和 /admin/applications。
+    // “管理”作为中间面包屑时不给链接，避免点过去 404。
+    const noLink = seg === "admin";
+    result.push(isLast || noLink ? { label } : { label, href });
   });
   return result;
 }

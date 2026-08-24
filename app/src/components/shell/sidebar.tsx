@@ -5,9 +5,13 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { site, desktopNav, adminNav } from "@/lib/site";
 import { NamedIcon } from "@/components/ui/icon";
+import { useCurrentUser } from "@/app/(app)/user-context";
+import { env } from "@/lib/env";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const user = useCurrentUser();
+  const isAdmin = user?.role === "ADMIN";
 
   return (
     <aside
@@ -25,15 +29,19 @@ export function Sidebar() {
 
       <nav className="flex-1 space-y-1 px-3 py-3">
         <SidebarSection items={desktopNav} pathname={pathname} />
-        <div className="my-3 border-t border-[var(--color-border)]" />
-        <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
-          管理
-        </p>
-        <SidebarSection items={adminNav} pathname={pathname} />
+        {isAdmin && (
+          <>
+            <div className="my-3 border-t border-[var(--color-border)]" />
+            <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+              管理
+            </p>
+            <SidebarSection items={adminNav} pathname={pathname} />
+          </>
+        )}
       </nav>
 
       <div className="px-5 py-3 text-[11px] text-[var(--color-text-muted)]">
-        v{site.version} · 开发模式
+        v{site.version}{env.NODE_ENV !== "production" ? " · 开发模式" : ""}
       </div>
     </aside>
   );

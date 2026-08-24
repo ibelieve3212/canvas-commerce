@@ -7,14 +7,18 @@ import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { mobileNav, desktopNav, adminNav, site } from "@/lib/site";
 import { NamedIcon } from "@/components/ui/icon";
+import { useCurrentUser } from "@/app/(app)/user-context";
 
 export function MobileNav() {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
+  const user = useCurrentUser();
+  const isAdmin = user?.role === "ADMIN";
 
-  const moreItems = [...desktopNav, ...adminNav].filter(
-    (i) => !mobileNav.some((m) => m.href === i.href),
-  );
+  const moreItems = [
+    ...desktopNav,
+    ...(isAdmin ? adminNav : []),
+  ].filter((i) => !mobileNav.some((m) => m.href === i.href));
 
   return (
     <nav
