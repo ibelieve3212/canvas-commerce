@@ -7,6 +7,7 @@ import {
   Users,
   AppWindow,
   MessageCircle,
+  HardDrive,
   type LucideIcon,
 } from "lucide-react";
 
@@ -18,6 +19,7 @@ const iconMap: Record<string, LucideIcon> = {
   Users,
   AppWindow,
   MessageCircle,
+  HardDrive,
 };
 
 export function NamedIcon({

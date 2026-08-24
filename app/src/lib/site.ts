@@ -33,4 +33,5 @@ export const mobileNav = [
 export const adminNav = [
   { href: "/admin/users", label: "用户管理", icon: "Users" },
   { href: "/admin/applications", label: "应用管理", icon: "AppWindow" },
+  { href: "/admin/storage", label: "存储清理", icon: "HardDrive" },
 ] as const;
