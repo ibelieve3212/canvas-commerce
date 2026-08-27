@@ -36,10 +36,16 @@ model User {
   providerBaseUrl String?
   providerApiKey  String?
   providerModel   String?
+  // true 时生图跟随全局默认渠道，忽略上面三个字段。
+  // 需要独立字段而非"字段为空即跟随"——后者是隐式规则，
+  // 用户取消勾选、还没填完就刷新，勾选框会自己跳回去。
+  useGlobalProvider Boolean @default(true)
   // Chat 渠道配置（为空时用管理员默认/env）
   chatBaseUrl   String?
   chatApiKey    String?
   chatModel     String?
+  // true 时聊天跟随全局默认聊天渠道。
+  useGlobalChat Boolean @default(true)
   // true 时聊天直接复用生图渠道的 baseUrl/apiKey，不必重复填一遍 key。
   // 同一平台通常同时提供 images 和 chat/completions 接口。
   chatUseImageChannel Boolean @default(false)

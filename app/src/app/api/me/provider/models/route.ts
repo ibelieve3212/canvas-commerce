@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/server/auth/session";
 import { prisma } from "@/server/db/client";
 import { env } from "@/lib/env";
 import { maskBaseUrl } from "@/server/log/sanitize";
+import { groupModels } from "@/lib/model-kind";
 import { z } from "zod";
 
 /**
@@ -22,6 +23,8 @@ const Body = z.object({
   baseUrl: z.string().optional(),
   apiKey: z.string().optional(),
   scope: z.enum(["user", "global"]).optional(),
+  /** 按用途分组排序。不传则不分组，原样返回全部。 */
+  kind: z.enum(["image", "chat"]).optional(),
 }).optional();
 
 export async function POST(req: NextRequest) {
@@ -36,6 +39,7 @@ export async function POST(req: NextRequest) {
     let bodyBaseUrl: string | undefined;
     let bodyApiKey: string | undefined;
     let scope: "user" | "global" = "user";
+    let kind: "image" | "chat" | undefined;
     try {
       const json = await req.json();
       const parsed = Body.safeParse(json);
@@ -43,6 +47,7 @@ export async function POST(req: NextRequest) {
         bodyBaseUrl = parsed.data.baseUrl;
         bodyApiKey = parsed.data.apiKey;
         scope = parsed.data.scope ?? "user";
+        kind = parsed.data.kind;
       }
     } catch {
       // body 为空，忽略
@@ -111,7 +116,13 @@ export async function POST(req: NextRequest) {
           .sort()
       : [];
 
-    return NextResponse.json({ data: { models, count: models.length }, requestId });
+    // 按用途分组：疑似匹配的排前面，其余仍可选（不硬过滤，见 model-kind.ts）
+    const grouped = kind ? groupModels(models, kind) : null;
+
+    return NextResponse.json({
+      data: { models, count: models.length, grouped },
+      requestId,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[provider/models] error:", message);

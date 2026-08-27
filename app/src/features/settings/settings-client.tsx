@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/cn";
+import { isLikelyWrongKind as looksWrongKind } from "@/lib/model-kind";
 import { Eye, EyeOff, Save, Shield, Server, Trash2, Key, RefreshCw, MessageCircle } from "lucide-react";
 
 interface ProviderData {
@@ -17,6 +18,7 @@ interface ProviderData {
     hasApiKey: boolean;
     apiKeyMasked: string;
     model: string;
+    useGlobal: boolean;
   };
   chatConfig?: {
     baseUrl: string;
@@ -24,10 +26,19 @@ interface ProviderData {
     apiKeyMasked: string;
     model: string;
     useImageChannel: boolean;
+    useGlobal: boolean;
   };
+  /** 全局是否已配置。不含 baseUrl/key，普通用户也能拿。 */
+  globalConfigured: { image: boolean; chat: boolean };
   chatAdminDefault?: { baseUrl: string; hasKey: boolean; model: string } | null;
   adminDefault: { baseUrl: string; hasKey: boolean; model: string } | null;
   isAdmin: boolean;
+}
+
+/** models 接口的分组结果 */
+interface GroupedModels {
+  likely: string[];
+  other: string[];
 }
 
 interface CleanupImpact {
@@ -56,6 +67,87 @@ interface CleanupPolicyData {
 }
 
 
+/**
+ * 模型选择控件。有分组结果时用 optgroup 下拉（推荐的排前面、其余仍可选），
+ * 没有时退化为文本输入。选了明显不匹配用途的模型会给一行浅色提示。
+ *
+ * 不硬过滤的理由见 lib/model-kind.ts：模型名没有可靠规律，
+ * 过滤漏掉一个用户就永远找不到它。
+ */
+function ModelPicker(props: {
+  id: string;
+  label: string;
+  kind: "image" | "chat";
+  value: string;
+  onChange: (v: string) => void;
+  grouped: GroupedModels | null;
+  onClear: () => void;
+  onFetch: () => void;
+  fetching: boolean;
+  placeholder: string;
+  hint?: string;
+}) {
+  const { grouped, value, kind } = props;
+  const all = grouped ? [...grouped.likely, ...grouped.other] : [];
+  // 与用途明显不符的提示：只在"明显属于另一边"时出现，名字看不出规律的不打扰
+  const wrongKind = looksWrongKind(value, kind);
+
+  return (
+    <div>
+      <Label htmlFor={props.id}>{props.label}</Label>
+      <div className="flex gap-2">
+        {grouped ? (
+          <Select id={props.id} value={value} onChange={(e) => props.onChange(e.target.value)}>
+            {!all.includes(value) && value && <option value={value}>{value}</option>}
+            {grouped.likely.length > 0 && (
+              <optgroup label={kind === "image" ? "生图模型" : "聊天模型"}>
+                {grouped.likely.map((m) => <option key={m} value={m}>{m}</option>)}
+              </optgroup>
+            )}
+            {grouped.other.length > 0 && (
+              <optgroup label="其他">
+                {grouped.other.map((m) => <option key={m} value={m}>{m}</option>)}
+              </optgroup>
+            )}
+          </Select>
+        ) : (
+          <Input
+            id={props.id}
+            type="text"
+            value={value}
+            onChange={(e) => props.onChange(e.target.value)}
+            placeholder={props.placeholder}
+          />
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={props.onFetch}
+          loading={props.fetching}
+          className="shrink-0"
+          title="获取可用模型列表"
+        >
+          <RefreshCw className="size-4" />
+        </Button>
+      </div>
+      {wrongKind && (
+        <p className="mt-1 text-xs text-[var(--color-warning)]">
+          {kind === "chat"
+            ? "这看起来是生图模型，聊天可能不可用"
+            : "这看起来是聊天模型，生图可能不可用"}
+        </p>
+      )}
+      <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+        {grouped ? (
+          <>已获取 {all.length} 个模型 · <button type="button" className="text-[var(--color-accent)] hover:underline" onClick={props.onClear}>切换手动输入</button></>
+        ) : (
+          props.hint ?? "填好地址和 Token 后点刷新获取可用模型"
+        )}
+      </p>
+    </div>
+  );
+}
+
 export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
   const showToast = useToast();
   const router = useRouter();
@@ -67,7 +159,7 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
   const [loading, setLoading] = React.useState(true);
   const [quota, setQuota] = React.useState<{ dailyLimit: number; dailyUsed: number; totalQuota: number; totalUsed: number } | null>(null);
 
-  // Provider 配置
+  // Provider 配置（生图，用户级）
   const [providerData, setProviderData] = React.useState<ProviderData | null>(null);
   const [baseUrl, setBaseUrl] = React.useState("");
   const [apiKey, setApiKey] = React.useState("");
@@ -76,10 +168,12 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
   const [savingProvider, setSavingProvider] = React.useState(false);
   const [hasExistingKey, setHasExistingKey] = React.useState(false);
   const [keyEditMode, setKeyEditMode] = React.useState(false);
-  const [fetchedModels, setFetchedModels] = React.useState<string[]>([]);
+  const [fetchedModels, setFetchedModels] = React.useState<GroupedModels | null>(null);
   const [fetchingModels, setFetchingModels] = React.useState(false);
+  /** 勾上则生图跟随全局默认渠道，下方输入区收起 */
+  const [useGlobalImage, setUseGlobalImage] = React.useState(true);
 
-  // 管理员默认配置（全局）——生图与聊天各一套
+  // 全局默认配置（仅管理员，独立编辑）
   const [adminBase, setAdminBase] = React.useState("");
   const [adminKey, setAdminKey] = React.useState("");
   const [adminModel, setAdminModel] = React.useState("");
@@ -89,26 +183,27 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
   const [savingAdmin, setSavingAdmin] = React.useState(false);
   const [savingAdminChat, setSavingAdminChat] = React.useState(false);
   /** 全局渠道的"获取模型"结果，与用户级分开存，避免串台 */
-  const [adminFetchedModels, setAdminFetchedModels] = React.useState<string[]>([]);
-  const [adminChatFetchedModels, setAdminChatFetchedModels] = React.useState<string[]>([]);
+  const [adminFetchedModels, setAdminFetchedModels] = React.useState<GroupedModels | null>(null);
+  const [adminChatFetchedModels, setAdminChatFetchedModels] = React.useState<GroupedModels | null>(null);
   const [fetchingAdminModels, setFetchingAdminModels] = React.useState(false);
   const [fetchingAdminChatModels, setFetchingAdminChatModels] = React.useState(false);
-  /** 全局配置区默认折叠——普通用户看不到，管理员也不必每次都面对 */
-  const [showGlobalImage, setShowGlobalImage] = React.useState(false);
-  const [showGlobalChat, setShowGlobalChat] = React.useState(false);
+  /** 待确认的全局配置清除操作 */
+  const [pendingClearGlobal, setPendingClearGlobal] = React.useState<"image" | "chat" | null>(null);
+  const [clearingGlobal, setClearingGlobal] = React.useState(false);
 
-  /** 聊天渠道来源：与生图相同 / 用全局 / 自定义 */
-  const [chatSource, setChatSource] = React.useState<"image" | "global" | "custom">("global");
-
-  // Chat 渠道配置
+  // Chat 渠道配置（用户级）
   const [chatBaseUrl, setChatBaseUrl] = React.useState("");
   const [chatApiKey, setChatApiKey] = React.useState("");
   const [chatModel, setChatModel] = React.useState("gpt-4o");
   const [hasExistingChatKey, setHasExistingChatKey] = React.useState(false);
   const [chatKeyEditMode, setChatKeyEditMode] = React.useState(false);
   const [savingChatProvider, setSavingChatProvider] = React.useState(false);
-  const [fetchedChatModels, setFetchedChatModels] = React.useState<string[]>([]);
+  const [fetchedChatModels, setFetchedChatModels] = React.useState<GroupedModels | null>(null);
   const [fetchingChatModels, setFetchingChatModels] = React.useState(false);
+  /** 勾上则聊天跟随全局默认聊天渠道 */
+  const [useGlobalChatFlag, setUseGlobalChatFlag] = React.useState(true);
+  /** 取消跟随全局后，聊天渠道来源：与生图相同 / 自定义 */
+  const [chatSource, setChatSource] = React.useState<"image" | "custom">("image");
 
   // 清理策略（仅管理员）
   const [cleanupDays, setCleanupDays] = React.useState("30");
@@ -133,6 +228,7 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
         setBaseUrl(json.data.userConfig.baseUrl);
         setHasExistingKey(json.data.userConfig.hasApiKey);
         setModel(json.data.userConfig.model || json.data.adminDefault?.model || "gpt-image-2");
+        setUseGlobalImage(json.data.userConfig.useGlobal);
         if (json.data.adminDefault) {
           setAdminBase(json.data.adminDefault.baseUrl);
           setAdminModel(json.data.adminDefault.model || "gpt-image-2");
@@ -146,15 +242,9 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
           setChatBaseUrl(json.data.chatConfig.baseUrl);
           setHasExistingChatKey(json.data.chatConfig.hasApiKey);
           setChatModel(json.data.chatConfig.model || "gpt-4o");
-          // 选中态要反映后端真实回退：勾了复用生图 → image；
-          // 自己填了 baseUrl+key → custom；都没有 → 走全局
-          setChatSource(
-            json.data.chatConfig.useImageChannel
-              ? "image"
-              : json.data.chatConfig.baseUrl && json.data.chatConfig.hasApiKey
-                ? "custom"
-                : "global",
-          );
+          setUseGlobalChatFlag(json.data.chatConfig.useGlobal);
+          // 取消跟随全局后的来源：勾了复用生图 → image，否则自定义
+          setChatSource(json.data.chatConfig.useImageChannel ? "image" : "custom");
         }
         setLoading(false);
       }
@@ -279,16 +369,22 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
   async function handleSaveProvider() {
     setSavingProvider(true);
     try {
-      const body: Record<string, unknown> = { baseUrl, model };
-      // 保存逻辑：
-      // - 已有 key 且进入修改模式：有输入则更新，空输入则清除
-      // - 已有 key 且未进入修改模式：不变更 key
-      // - 没有已有 key：输入框有值则保存
-      if (hasExistingKey && keyEditMode) {
-        if (apiKey) body.apiKey = apiKey;
-        else body.clearApiKey = true;
-      } else if (!hasExistingKey && apiKey) {
-        body.apiKey = apiKey;
+      const body: Record<string, unknown> = {
+        model,
+        useGlobalProvider: useGlobalImage,
+      };
+      if (!useGlobalImage) {
+        body.baseUrl = baseUrl;
+        // 保存逻辑：
+        // - 已有 key 且进入修改模式：有输入则更新，空输入则清除
+        // - 已有 key 且未进入修改模式：不变更 key
+        // - 没有已有 key：输入框有值则保存
+        if (hasExistingKey && keyEditMode) {
+          if (apiKey) body.apiKey = apiKey;
+          else body.clearApiKey = true;
+        } else if (!hasExistingKey && apiKey) {
+          body.apiKey = apiKey;
+        }
       }
 
       const res = await fetch("/api/me/provider", {
@@ -301,7 +397,7 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
         showToast("error", json.error?.message || "保存失败");
         return;
       }
-      showToast("success", "Provider 配置已保存");
+      showToast("success", useGlobalImage ? "已设为使用系统默认生图渠道" : "生图渠道已保存");
       setApiKey("");
       setKeyEditMode(false);
       // 重新加载
@@ -322,7 +418,7 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
     setFetchingModels(true);
     try {
       // 构造临时配置：当前表单值 > 已保存配置
-      const body: Record<string, string> = {};
+      const body: Record<string, string> = { kind: "image" };
       if (baseUrl) body.baseUrl = baseUrl;
       // apiKey: 如果在编辑模式或首次配置，用输入框的值
       if (apiKey) body.apiKey = apiKey;
@@ -330,20 +426,21 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
       const res = await fetch("/api/me/provider/models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
+        body: JSON.stringify(body),
       });
       const json = await res.json();
       if (!res.ok) {
         showToast("error", json.error?.message || "获取模型列表失败");
         return;
       }
-      const models = json.data?.models ?? [];
-      if (models.length === 0) {
+      const grouped = json.data?.grouped as GroupedModels | null;
+      const total = json.data?.count ?? 0;
+      if (!grouped || total === 0) {
         showToast("error", "模型列表为空");
         return;
       }
-      setFetchedModels(models);
-      showToast("success", `已获取 ${models.length} 个模型`);
+      setFetchedModels(grouped);
+      showToast("success", `已获取 ${total} 个模型`);
     } catch {
       showToast("error", "网络错误");
     } finally {
@@ -372,6 +469,7 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
       }
       showToast("success", "全局生图渠道已保存");
       setAdminKey("");
+      await refreshProviderData();
     } catch {
       showToast("error", "网络错误");
     } finally {
@@ -412,15 +510,107 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
       }
       showToast("success", "全局聊天渠道已保存");
       setAdminChatKey("");
-      const refreshed = await fetch("/api/me/provider").then((r) => r.json());
-      if (refreshed.data?.chatAdminDefault) {
-        setAdminChatBase(refreshed.data.chatAdminDefault.baseUrl);
-        setProviderData(refreshed.data);
-      }
+      await refreshProviderData();
     } catch {
       showToast("error", "网络错误");
     } finally {
       setSavingAdminChat(false);
+    }
+  }
+
+  /** 重新拉取并同步所有渠道相关状态。保存后统一走这里，避免各处漏回填。 */
+  async function refreshProviderData() {
+    const json = await fetch("/api/me/provider").then((r) => r.json());
+    if (!json.data) return;
+    setProviderData(json.data);
+    setHasExistingKey(json.data.userConfig.hasApiKey);
+    setUseGlobalImage(json.data.userConfig.useGlobal);
+    if (json.data.adminDefault) {
+      setAdminBase(json.data.adminDefault.baseUrl);
+      setAdminModel(json.data.adminDefault.model || "gpt-image-2");
+    }
+    if (json.data.chatAdminDefault) {
+      setAdminChatBase(json.data.chatAdminDefault.baseUrl);
+      setAdminChatModel(json.data.chatAdminDefault.model || "gpt-4o");
+    }
+    if (json.data.chatConfig) {
+      setChatBaseUrl(json.data.chatConfig.baseUrl);
+      setHasExistingChatKey(json.data.chatConfig.hasApiKey);
+      setChatModel(json.data.chatConfig.model || "gpt-4o");
+      setUseGlobalChatFlag(json.data.chatConfig.useGlobal);
+      setChatSource(json.data.chatConfig.useImageChannel ? "image" : "custom");
+    }
+  }
+
+  /**
+   * 把管理员自己的个人配置复制到全局。
+   *
+   * Key 不经前端：GET 只返回掩码，明文拿不到。所以这里只填 baseUrl/model，
+   * 让后端用 copyKeyFromSelf 从管理员的用户记录里直接复制 Key。
+   */
+  async function handleCopySelfToGlobal(kind: "image" | "chat") {
+    const setSaving = kind === "image" ? setSavingAdmin : setSavingAdminChat;
+    setSaving(true);
+    try {
+      const body: Record<string, string> = { copyKeyFromSelf: kind };
+      if (kind === "image") {
+        body.baseUrl = baseUrl;
+        body.model = model;
+      } else {
+        // 聊天若选了"与生图相同"，地址也应取生图那套
+        body.chatBaseUrl = chatSource === "image" ? baseUrl : chatBaseUrl;
+        body.chatModel = chatModel;
+      }
+
+      const res = await fetch("/api/me/provider", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        showToast("error", json.error?.message || "复用失败");
+        return;
+      }
+      showToast("success", "已复用个人配置到全局默认");
+      await refreshProviderData();
+    } catch {
+      showToast("error", "网络错误");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** 清除全局配置。取消勾选不清全局（会断掉正在用的人），只有显式点清除才清。 */
+  async function handleClearGlobal() {
+    const kind = pendingClearGlobal;
+    if (!kind) return;
+    setClearingGlobal(true);
+    try {
+      const res = await fetch("/api/me/provider", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clear: kind }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        showToast("error", json.error?.message || "清除失败");
+        return;
+      }
+      showToast("success", kind === "image" ? "全局生图渠道已清除" : "全局聊天渠道已清除");
+      if (kind === "image") {
+        setAdminBase("");
+        setAdminKey("");
+      } else {
+        setAdminChatBase("");
+        setAdminChatKey("");
+      }
+      setPendingClearGlobal(null);
+      await refreshProviderData();
+    } catch {
+      showToast("error", "网络错误");
+    } finally {
+      setClearingGlobal(false);
     }
   }
 
@@ -429,12 +619,11 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
     try {
       const body: Record<string, unknown> = {
         chatModel,
-        // 持久化"与生图渠道相同"的选择。此前这是个只填输入框的按钮，
-        // 不填 key 就等于没配置，用户点了却仍被提示未配置。
-        chatUseImageChannel: chatSource === "image",
+        useGlobalChat: useGlobalChatFlag,
+        chatUseImageChannel: !useGlobalChatFlag && chatSource === "image",
       };
 
-      if (chatSource === "custom") {
+      if (!useGlobalChatFlag && chatSource === "custom") {
         body.chatBaseUrl = chatBaseUrl;
         if (hasExistingChatKey && chatKeyEditMode) {
           if (chatApiKey) body.chatApiKey = chatApiKey;
@@ -443,7 +632,7 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
           body.chatApiKey = chatApiKey;
         }
       } else {
-        // 选了复用生图或全局，清掉用户级 chat 配置，否则它优先级更高会盖住选择
+        // 跟随全局或复用生图时清掉用户级 chat 配置，否则它优先级更高会盖住选择
         body.chatBaseUrl = "";
         body.clearChatApiKey = true;
       }
@@ -460,24 +649,15 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
       }
       showToast(
         "success",
-        chatSource === "image"
-          ? "已设为与生图渠道相同"
-          : chatSource === "global"
-            ? "已设为使用全局聊天渠道"
-            : "Chat 渠道配置已保存",
+        useGlobalChatFlag
+          ? "已设为使用系统默认聊天渠道"
+          : chatSource === "image"
+            ? "已设为与生图渠道相同"
+            : "聊天渠道已保存",
       );
       setChatApiKey("");
       setChatKeyEditMode(false);
-      // 重新加载
-      const refreshRes = await fetch("/api/me/provider");
-      const refreshJson = await refreshRes.json();
-      if (refreshJson.data?.chatConfig) {
-        setProviderData(refreshJson.data);
-        setChatBaseUrl(refreshJson.data.chatConfig.baseUrl);
-        setHasExistingChatKey(refreshJson.data.chatConfig.hasApiKey);
-        // 此前漏了这行，保存后模型框会回落到旧值
-        setChatModel(refreshJson.data.chatConfig.model || "gpt-4o");
-      }
+      await refreshProviderData();
     } catch {
       showToast("error", "网络错误");
     } finally {
@@ -491,7 +671,7 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
     const setModels = kind === "image" ? setAdminFetchedModels : setAdminChatFetchedModels;
     setFetching(true);
     try {
-      const body: Record<string, string> = { scope: "global" };
+      const body: Record<string, string> = { scope: "global", kind };
       const base = kind === "image" ? adminBase : adminChatBase;
       const key = kind === "image" ? adminKey : adminChatKey;
       if (base) body.baseUrl = base;
@@ -508,13 +688,14 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
         showToast("error", json.error?.message || "获取模型列表失败");
         return;
       }
-      const models = json.data?.models ?? [];
-      if (models.length === 0) {
+      const grouped = json.data?.grouped as GroupedModels | null;
+      const total = json.data?.count ?? 0;
+      if (!grouped || total === 0) {
         showToast("error", "模型列表为空");
         return;
       }
-      setModels(models);
-      showToast("success", `已获取 ${models.length} 个模型`);
+      setModels(grouped);
+      showToast("success", `已获取 ${total} 个模型`);
     } catch {
       showToast("error", "网络错误");
     } finally {
@@ -525,34 +706,38 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
   async function handleFetchChatModels() {
     setFetchingChatModels(true);
     try {
-      // 用 chat 配置获取模型列表
-      const body: Record<string, string> = {};
-      body.baseUrl = chatBaseUrl;
-      if (chatApiKey) body.apiKey = chatApiKey;
+      const body: Record<string, string> = { kind: "chat" };
+      // 选了"与生图相同"时，模型列表要从生图那个渠道拉
+      const base = chatSource === "image" ? baseUrl : chatBaseUrl;
+      if (base) body.baseUrl = base;
+      const key = chatSource === "image" ? apiKey : chatApiKey;
+      if (key) body.apiKey = key;
 
       const res = await fetch("/api/me/provider/models", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
+        body: JSON.stringify(body),
       });
       const json = await res.json();
       if (!res.ok) {
         showToast("error", json.error?.message || "获取模型列表失败");
         return;
       }
-      const models = json.data?.models ?? [];
-      if (models.length === 0) {
+      const grouped = json.data?.grouped as GroupedModels | null;
+      const total = json.data?.count ?? 0;
+      if (!grouped || total === 0) {
         showToast("error", "模型列表为空");
         return;
       }
-      setFetchedChatModels(models);
-      showToast("success", `已获取 ${models.length} 个模型`);
+      setFetchedChatModels(grouped);
+      showToast("success", `已获取 ${total} 个模型`);
     } catch {
       showToast("error", "网络错误");
     } finally {
       setFetchingChatModels(false);
     }
   }
+
 
   if (loading) return <p className="text-sm text-[var(--color-text-muted)]">加载中…</p>;
 
@@ -611,223 +796,139 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
           </div>
         </section>
 
-        {/* 用户级 Provider 配置 */}
+        {/* 生图渠道（用户级） */}
         <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
           <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
-            <Server className="size-4" /> Provider 配置
+            <Server className="size-4" /> 生图渠道
           </h2>
           <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-            配置后生图将调用真实 API。未配置时使用管理员默认或降级到 Mock。
+            生图调用的 API 渠道。未配置且系统也没有默认渠道时降级到 Mock。
           </p>
 
           {/* 当前状态 */}
           <div className="mb-4 flex items-center gap-2">
             <span className="text-xs text-[var(--color-text-muted)]">当前状态</span>
-            {baseUrl && hasExistingKey ? (
+            {useGlobalImage ? (
+              providerData?.globalConfigured.image ? (
+                <Badge variant="success">使用系统默认渠道</Badge>
+              ) : (
+                <Badge variant="neutral">Mock 模式（系统默认未配置）</Badge>
+              )
+            ) : baseUrl && hasExistingKey ? (
               <Badge variant="success">已配置（{providerData?.userConfig.apiKeyMasked}）</Badge>
-            ) : providerData?.adminDefault?.hasKey ? (
-              <Badge variant="neutral">使用管理员默认</Badge>
             ) : (
-              <Badge variant="neutral">Mock 模式</Badge>
+              <Badge variant="warning">尚未填写完整</Badge>
             )}
           </div>
 
-          <div className="space-y-3 max-w-md">
-            <div>
-              <Label htmlFor="base-url">Provider Base URL</Label>
-              <Input
-                id="base-url"
-                type="text"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="http://127.0.0.1:8080"
-              />
-            </div>
+          {/* 跟随全局开关。勾上则整个输入区收起——不渲染而非灰显，
+              因为全局的 baseUrl/key 后端对普通用户根本不返回。 */}
+          <label className="mb-3 flex max-w-md cursor-pointer items-start gap-2 rounded-lg border border-[var(--color-border)] p-2.5 hover:bg-[var(--color-surface-subtle)]">
+            <input
+              type="checkbox"
+              checked={useGlobalImage}
+              onChange={(e) => setUseGlobalImage(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block text-xs font-medium text-[var(--color-text)]">使用系统默认生图渠道</span>
+              <span className="block text-xs text-[var(--color-text-muted)]">
+                由管理员配置，无需自行填写
+                {providerData?.globalConfigured.image === false && "（当前尚未配置）"}
+              </span>
+            </span>
+          </label>
 
-            {/* API Key */}
-            <div>
-              <Label htmlFor="api-key">API Token</Label>
-              {hasExistingKey && !keyEditMode ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="api-key"
-                    type="text"
-                    value={providerData?.userConfig.apiKeyMasked ?? "***"}
-                    disabled
-                  />
-                  <Button variant="ghost" size="sm" onClick={() => { setKeyEditMode(true); setApiKey(""); }} className="shrink-0">
-                    <Key className="mr-1 size-4" /> 修改
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={async () => {
-                    await fetch("/api/me/provider", {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ clearApiKey: true }),
-                    });
-                    setHasExistingKey(false);
-                    setKeyEditMode(false);
-                    showToast("success", "API Token 已清除");
-                  }} className="shrink-0 text-[var(--color-danger)]">
-                    <Trash2 className="size-4" />
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex gap-2">
-                  <Input
-                    id="api-key"
-                    type={showKey ? "text" : "password"}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="sk-..."
-                  />
-                  <Button variant="ghost" size="sm" onClick={() => setShowKey(!showKey)} className="shrink-0">
-                    {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            {/* 模型选择 */}
-            <div>
-              <Label htmlFor="model-select">生图模型</Label>
-              <div className="flex gap-2">
-                {fetchedModels.length > 0 ? (
-                  <Select
-                    id="model-select"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                  >
-                    {!fetchedModels.includes(model) && <option value={model}>{model}</option>}
-                    {fetchedModels.map(m => <option key={m} value={m}>{m}</option>)}
-                  </Select>
-                ) : (
-                  <Input
-                    id="model-select"
-                    type="text"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder="gpt-image-2"
-                  />
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleFetchModels}
-                  loading={fetchingModels}
-                  className="shrink-0"
-                  title="从 Provider 获取可用模型列表"
-                >
-                  <RefreshCw className="size-4" />
-                </Button>
+          {!useGlobalImage && (
+            <div className="space-y-3 max-w-md">
+              <div>
+                <Label htmlFor="base-url">Base URL</Label>
+                <Input
+                  id="base-url"
+                  type="text"
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
+                  placeholder="http://127.0.0.1:8080"
+                />
               </div>
-              {fetchedModels.length > 0 ? (
-                <div className="mt-1">
-                  <p className="text-xs text-[var(--color-success)]">已获取 {fetchedModels.length} 个模型</p>
-                  <button
-                    type="button"
-                    className="text-xs text-[var(--color-accent)] hover:underline"
-                    onClick={() => setFetchedModels([])}
-                  >切换为手动输入</button>
-                </div>
-              ) : (
-                <p className="mt-1 text-xs text-[var(--color-text-muted)]">填写 Base URL 和 Token 后点刷新按钮获取可用模型</p>
-              )}
+
+              {/* API Key */}
+              <div>
+                <Label htmlFor="api-key">API Token</Label>
+                {hasExistingKey && !keyEditMode ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="api-key"
+                      type="text"
+                      value={providerData?.userConfig.apiKeyMasked ?? "***"}
+                      disabled
+                    />
+                    <Button variant="ghost" size="sm" onClick={() => { setKeyEditMode(true); setApiKey(""); }} className="shrink-0">
+                      <Key className="mr-1 size-4" /> 修改
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={async () => {
+                      await fetch("/api/me/provider", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ clearApiKey: true }),
+                      });
+                      setHasExistingKey(false);
+                      setKeyEditMode(false);
+                      showToast("success", "API Token 已清除");
+                    }} className="shrink-0 text-[var(--color-danger)]">
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Input
+                      id="api-key"
+                      type={showKey ? "text" : "password"}
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="sk-..."
+                    />
+                    <Button variant="ghost" size="sm" onClick={() => setShowKey(!showKey)} className="shrink-0">
+                      {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
+          )}
+
+          {/* 模型始终可选：即使跟随全局，也允许自己指定用哪个模型 */}
+          <div className="mt-3 space-y-3 max-w-md">
+            <ModelPicker
+              id="model-select"
+              label="生图模型"
+              kind="image"
+              value={model}
+              onChange={setModel}
+              grouped={fetchedModels}
+              onClear={() => setFetchedModels(null)}
+              onFetch={handleFetchModels}
+              fetching={fetchingModels}
+              placeholder="gpt-image-2"
+              hint={useGlobalImage ? "留空则用系统默认模型" : undefined}
+            />
 
             <Button onClick={handleSaveProvider} loading={savingProvider} size="sm">
-              <Save className="mr-1 size-4" /> 保存配置
+              <Save className="mr-1 size-4" /> 保存生图渠道
             </Button>
           </div>
 
-          {/* Base URL 说明 */}
-          <div className="mt-2 max-w-md">
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Base URL 只填域名和端口（如 <code className="rounded bg-[var(--color-surface-subtle)] px-1">http://127.0.0.1:8080</code>），
-              系统会自动拼接 <code className="rounded bg-[var(--color-surface-subtle)] px-1">/v1/images/generations</code> 路径，无需手动加 <code className="rounded bg-[var(--color-surface-subtle)] px-1">/v1</code>。
-            </p>
-          </div>
+          {!useGlobalImage && (
+            <div className="mt-2 max-w-md">
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Base URL 只填域名和端口（如 <code className="rounded bg-[var(--color-surface-subtle)] px-1">http://127.0.0.1:8080</code>），
+                系统会自动拼接 <code className="rounded bg-[var(--color-surface-subtle)] px-1">/v1/images/generations</code> 路径，无需手动加 <code className="rounded bg-[var(--color-surface-subtle)] px-1">/v1</code>。
+              </p>
+            </div>
+          )}
         </section>
 
-        {/* 全局默认生图渠道（仅管理员，折叠） */}
-        {isAdmin && (
-          <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setShowGlobalImage((v) => !v)}
-              aria-expanded={showGlobalImage}
-              className="flex w-full items-center justify-between text-left"
-            >
-              <span className="flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
-                <Key className="size-4" /> 全局默认生图渠道
-                <Badge variant="neutral">管理员</Badge>
-              </span>
-              <span className="text-xs text-[var(--color-text-muted)]">
-                {providerData?.adminDefault?.baseUrl
-                  ? `已配置 · ${providerData.adminDefault.model || "未指定模型"}`
-                  : "未配置"}
-                {showGlobalImage ? " ▲" : " ▼"}
-              </span>
-            </button>
-
-            {showGlobalImage && (
-              <div className="mt-3">
-                <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-                  未自行配置生图渠道的用户会用这套。留空则降级到环境变量或 Mock。
-                </p>
-                <div className="space-y-3 max-w-md">
-                  <div>
-                    <Label htmlFor="admin-base">Base URL</Label>
-                    <Input id="admin-base" type="text" value={adminBase} onChange={(e) => setAdminBase(e.target.value)} placeholder="http://api.example.com" />
-                  </div>
-                  <div>
-                    <Label htmlFor="admin-key">API Token</Label>
-                    <div className="flex gap-2">
-                      <Input id="admin-key" type={showKey ? "text" : "password"} value={adminKey} onChange={(e) => setAdminKey(e.target.value)} placeholder={providerData?.adminDefault?.hasKey ? "已配置（输入覆盖）" : "sk-..."} />
-                      <Button variant="ghost" size="sm" onClick={() => setShowKey(!showKey)} className="shrink-0">
-                        {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                      </Button>
-                    </div>
-                  </div>
-                  <div>
-                    <Label htmlFor="admin-model">生图模型</Label>
-                    <div className="flex gap-2">
-                      {adminFetchedModels.length > 0 ? (
-                        <Select id="admin-model" value={adminModel} onChange={(e) => setAdminModel(e.target.value)}>
-                          {!adminFetchedModels.includes(adminModel) && <option value={adminModel}>{adminModel}</option>}
-                          {adminFetchedModels.map((m) => <option key={m} value={m}>{m}</option>)}
-                        </Select>
-                      ) : (
-                        <Input id="admin-model" type="text" value={adminModel} onChange={(e) => setAdminModel(e.target.value)} placeholder="gpt-image-2" />
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleFetchGlobalModels("image")}
-                        loading={fetchingAdminModels}
-                        className="shrink-0"
-                        title="从全局渠道获取可用模型列表"
-                      >
-                        <RefreshCw className="size-4" />
-                      </Button>
-                    </div>
-                    <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                      {adminFetchedModels.length > 0 ? (
-                        <>已获取 {adminFetchedModels.length} 个模型 · <button type="button" className="text-[var(--color-accent)] hover:underline" onClick={() => setAdminFetchedModels([])}>切换手动输入</button></>
-                      ) : (
-                        "已保存过 Token 时可直接点刷新，无需重填"
-                      )}
-                    </p>
-                  </div>
-                  <Button onClick={handleSaveAdminDefault} loading={savingAdmin} size="sm">
-                    <Save className="mr-1 size-4" /> 保存全局生图渠道
-                  </Button>
-                </div>
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* 聊天渠道 */}
+        {/* 聊天渠道（用户级） */}
         <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
           <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
             <MessageCircle className="size-4" /> 聊天渠道
@@ -836,40 +937,77 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
             聊天助手用的 API 渠道。需支持 OpenAI 兼容的 <code className="rounded bg-[var(--color-surface-subtle)] px-1">/v1/chat/completions</code> 接口。
           </p>
 
-          {/* 渠道来源单选。把优先级直接画在 UI 上，不再让人猜哪一栏生效。 */}
-          <div className="mb-4 space-y-2 max-w-md">
-            {([
-              { value: "image", label: "与生图渠道相同", hint: "直接复用生图的地址和 Token，无需重复填写" },
-              { value: "global", label: "使用全局聊天渠道", hint: providerData?.chatAdminDefault?.baseUrl ? `管理员已配置 · ${providerData.chatAdminDefault.model || "gpt-4o"}` : "管理员尚未配置，会回退到生图渠道" },
-              { value: "custom", label: "自定义", hint: "单独为聊天填一套地址和 Token" },
-            ] as const).map((opt) => (
-              <label
-                key={opt.value}
-                className={cn(
-                  "flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 transition-colors",
-                  chatSource === opt.value
-                    ? "border-[var(--color-accent)] bg-[var(--color-accent)]/8"
-                    : "border-[var(--color-border)] hover:bg-[var(--color-surface-subtle)]",
-                )}
-              >
-                <input
-                  type="radio"
-                  name="chat-source"
-                  value={opt.value}
-                  checked={chatSource === opt.value}
-                  onChange={() => setChatSource(opt.value)}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="block text-xs font-medium text-[var(--color-text)]">{opt.label}</span>
-                  <span className="block text-xs text-[var(--color-text-muted)]">{opt.hint}</span>
-                </span>
-              </label>
-            ))}
+          <div className="mb-4 flex items-center gap-2">
+            <span className="text-xs text-[var(--color-text-muted)]">当前状态</span>
+            {useGlobalChatFlag ? (
+              providerData?.globalConfigured.chat ? (
+                <Badge variant="success">使用系统默认渠道</Badge>
+              ) : providerData?.globalConfigured.image ? (
+                <Badge variant="neutral">回退到系统生图渠道</Badge>
+              ) : (
+                <Badge variant="warning">系统默认未配置</Badge>
+              )
+            ) : chatSource === "image" ? (
+              <Badge variant="success">与生图渠道相同</Badge>
+            ) : chatBaseUrl && hasExistingChatKey ? (
+              <Badge variant="success">已配置（{providerData?.chatConfig?.apiKeyMasked}）</Badge>
+            ) : (
+              <Badge variant="warning">尚未填写完整</Badge>
+            )}
           </div>
 
+          <label className="mb-3 flex max-w-md cursor-pointer items-start gap-2 rounded-lg border border-[var(--color-border)] p-2.5 hover:bg-[var(--color-surface-subtle)]">
+            <input
+              type="checkbox"
+              checked={useGlobalChatFlag}
+              onChange={(e) => setUseGlobalChatFlag(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block text-xs font-medium text-[var(--color-text)]">使用系统默认聊天渠道</span>
+              <span className="block text-xs text-[var(--color-text-muted)]">
+                由管理员配置，无需自行填写
+                {providerData?.globalConfigured.chat === false && "（当前未配置，会回退到系统生图渠道）"}
+              </span>
+            </span>
+          </label>
+
+          {/* 取消跟随全局后才需要选来源。只有两个选项——"用全局"已经由上面的
+              勾选框表达了，再放进单选组会让同一件事有两个入口。 */}
+          {!useGlobalChatFlag && (
+            <div className="mb-4 space-y-2 max-w-md">
+              {([
+                { value: "image", label: "与生图渠道相同", hint: "复用生图的地址和 Token，无需重复填写" },
+                { value: "custom", label: "自定义", hint: "单独为聊天填一套地址和 Token" },
+              ] as const).map((opt) => (
+                <label
+                  key={opt.value}
+                  className={cn(
+                    "flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 transition-colors",
+                    chatSource === opt.value
+                      ? "border-[var(--color-accent)] bg-[var(--color-accent)]/8"
+                      : "border-[var(--color-border)] hover:bg-[var(--color-surface-subtle)]",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="chat-source"
+                    value={opt.value}
+                    checked={chatSource === opt.value}
+                    onChange={() => setChatSource(opt.value)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block text-xs font-medium text-[var(--color-text)]">{opt.label}</span>
+                    <span className="block text-xs text-[var(--color-text-muted)]">{opt.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+
           <div className="space-y-3 max-w-md">
-            {chatSource === "custom" && (
+            {!useGlobalChatFlag && chatSource === "custom" && (
               <>
                 <div>
                   <Label htmlFor="chat-base-url">Chat Base URL</Label>
@@ -925,119 +1063,145 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
               </>
             )}
 
-            {/* 模型始终要选：生图模型（如 gpt-image-2）不能拿来聊天 */}
-            <div>
-              <Label htmlFor="chat-model">聊天模型</Label>
-              <div className="flex gap-2">
-                {fetchedChatModels.length > 0 ? (
-                  <Select
-                    id="chat-model"
-                    value={chatModel}
-                    onChange={(e) => setChatModel(e.target.value)}
-                  >
-                    {!fetchedChatModels.includes(chatModel) && <option value={chatModel}>{chatModel}</option>}
-                    {fetchedChatModels.map(m => <option key={m} value={m}>{m}</option>)}
-                  </Select>
-                ) : (
-                  <Input
-                    id="chat-model"
-                    type="text"
-                    value={chatModel}
-                    onChange={(e) => setChatModel(e.target.value)}
-                    placeholder="gpt-4o"
-                  />
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleFetchChatModels}
-                  loading={fetchingChatModels}
-                  className="shrink-0"
-                  title="从上游获取可用模型列表"
-                >
-                  <RefreshCw className="size-4" />
-                </Button>
-              </div>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                {fetchedChatModels.length > 0
-                  ? <>已获取 {fetchedChatModels.length} 个模型 · <button type="button" className="text-[var(--color-accent)] hover:underline" onClick={() => setFetchedChatModels([])}>切换手动输入</button></>
-                  : "支持 vision 的模型可看图（如 gpt-4o）"}
-              </p>
-            </div>
+            {/* 模型始终要选：生图模型（如 gpt-image-2）不能拿来聊天，
+                所以即使"与生图渠道相同"也不能连模型一起复用 */}
+            <ModelPicker
+              id="chat-model"
+              label="聊天模型"
+              kind="chat"
+              value={chatModel}
+              onChange={setChatModel}
+              grouped={fetchedChatModels}
+              onClear={() => setFetchedChatModels(null)}
+              onFetch={handleFetchChatModels}
+              fetching={fetchingChatModels}
+              placeholder="gpt-4o"
+              hint="支持 vision 的模型可看图（如 gpt-4o）"
+            />
 
             <Button onClick={handleSaveChatProvider} loading={savingChatProvider} size="sm">
               <Save className="mr-1 size-4" /> 保存聊天渠道
             </Button>
           </div>
+        </section>
 
-          {/* 全局默认聊天渠道（仅管理员，折叠） */}
-          {isAdmin && (
-            <div className="mt-4 border-t border-[var(--color-border)] pt-3">
-              <button
-                type="button"
-                onClick={() => setShowGlobalChat((v) => !v)}
-                aria-expanded={showGlobalChat}
-                className="flex w-full items-center justify-between text-left"
-              >
-                <span className="flex items-center gap-2 text-xs font-medium text-[var(--color-text)]">
-                  <Key className="size-3.5" /> 全局默认聊天渠道
-                  <Badge variant="neutral">管理员</Badge>
-                </span>
-                <span className="text-xs text-[var(--color-text-muted)]">
-                  {providerData?.chatAdminDefault?.baseUrl ? "已配置" : "未配置"}
-                  {showGlobalChat ? " ▲" : " ▼"}
-                </span>
-              </button>
+        {/* 全局默认生图渠道（仅管理员，独立编辑） */}
+        {isAdmin && (
+          <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
+              <Key className="size-4" /> 全局默认生图渠道
+              <Badge variant="neutral">管理员</Badge>
+            </h2>
+            <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+              勾选了「使用系统默认生图渠道」的用户会用这套。留空则降级到环境变量或 Mock。
+            </p>
 
-              {showGlobalChat && (
-                <div className="mt-3 space-y-3 max-w-md">
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    选了「使用全局聊天渠道」的用户会用这套。留空则回退到生图渠道。
-                  </p>
-                  <div>
-                    <Label htmlFor="admin-chat-base">Base URL</Label>
-                    <Input id="admin-chat-base" type="text" value={adminChatBase} onChange={(e) => setAdminChatBase(e.target.value)} placeholder="http://api.example.com" />
-                  </div>
-                  <div>
-                    <Label htmlFor="admin-chat-key">API Token</Label>
-                    <div className="flex gap-2">
-                      <Input id="admin-chat-key" type={showKey ? "text" : "password"} value={adminChatKey} onChange={(e) => setAdminChatKey(e.target.value)} placeholder={providerData?.chatAdminDefault?.hasKey ? "已配置（输入覆盖）" : "sk-..."} />
-                      <Button variant="ghost" size="sm" onClick={() => setShowKey(!showKey)} className="shrink-0">
-                        {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                      </Button>
-                    </div>
-                  </div>
-                  <div>
-                    <Label htmlFor="admin-chat-model">聊天模型</Label>
-                    <div className="flex gap-2">
-                      {adminChatFetchedModels.length > 0 ? (
-                        <Select id="admin-chat-model" value={adminChatModel} onChange={(e) => setAdminChatModel(e.target.value)}>
-                          {!adminChatFetchedModels.includes(adminChatModel) && <option value={adminChatModel}>{adminChatModel}</option>}
-                          {adminChatFetchedModels.map((m) => <option key={m} value={m}>{m}</option>)}
-                        </Select>
-                      ) : (
-                        <Input id="admin-chat-model" type="text" value={adminChatModel} onChange={(e) => setAdminChatModel(e.target.value)} placeholder="gpt-4o" />
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleFetchGlobalModels("chat")}
-                        loading={fetchingAdminChatModels}
-                        className="shrink-0"
-                        title="从全局聊天渠道获取可用模型列表"
-                      >
-                        <RefreshCw className="size-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  <Button onClick={handleSaveAdminChatDefault} loading={savingAdminChat} size="sm">
-                    <Save className="mr-1 size-4" /> 保存全局聊天渠道
-                  </Button>
-                </div>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Badge variant={providerData?.globalConfigured.image ? "success" : "neutral"}>
+                {providerData?.globalConfigured.image ? "已配置" : "未配置"}
+              </Badge>
+              <Button variant="ghost" size="sm" onClick={() => handleCopySelfToGlobal("image")} loading={savingAdmin}>
+                复用我的个人配置
+              </Button>
+              {providerData?.globalConfigured.image && (
+                <Button variant="ghost" size="sm" onClick={() => setPendingClearGlobal("image")} className="text-[var(--color-danger)]">
+                  <Trash2 className="mr-1 size-4" /> 清除
+                </Button>
               )}
             </div>
-          )}
-        </section>
+
+            <div className="space-y-3 max-w-md">
+              <div>
+                <Label htmlFor="admin-base">Base URL</Label>
+                <Input id="admin-base" type="text" value={adminBase} onChange={(e) => setAdminBase(e.target.value)} placeholder="http://api.example.com" />
+              </div>
+              <div>
+                <Label htmlFor="admin-key">API Token</Label>
+                <div className="flex gap-2">
+                  <Input id="admin-key" type={showKey ? "text" : "password"} value={adminKey} onChange={(e) => setAdminKey(e.target.value)} placeholder={providerData?.adminDefault?.hasKey ? "已配置（输入覆盖）" : "sk-..."} />
+                  <Button variant="ghost" size="sm" onClick={() => setShowKey(!showKey)} className="shrink-0">
+                    {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </Button>
+                </div>
+              </div>
+              <ModelPicker
+                id="admin-model"
+                label="生图模型"
+                kind="image"
+                value={adminModel}
+                onChange={setAdminModel}
+                grouped={adminFetchedModels}
+                onClear={() => setAdminFetchedModels(null)}
+                onFetch={() => handleFetchGlobalModels("image")}
+                fetching={fetchingAdminModels}
+                placeholder="gpt-image-2"
+                hint="已保存过 Token 时可直接点刷新，无需重填"
+              />
+              <Button onClick={handleSaveAdminDefault} loading={savingAdmin} size="sm">
+                <Save className="mr-1 size-4" /> 保存全局生图渠道
+              </Button>
+            </div>
+          </section>
+        )}
+
+        {/* 全局默认聊天渠道（仅管理员，独立编辑） */}
+        {isAdmin && (
+          <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
+              <Key className="size-4" /> 全局默认聊天渠道
+              <Badge variant="neutral">管理员</Badge>
+            </h2>
+            <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+              勾选了「使用系统默认聊天渠道」的用户会用这套。留空则回退到全局生图渠道。
+            </p>
+
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Badge variant={providerData?.globalConfigured.chat ? "success" : "neutral"}>
+                {providerData?.globalConfigured.chat ? "已配置" : "未配置"}
+              </Badge>
+              <Button variant="ghost" size="sm" onClick={() => handleCopySelfToGlobal("chat")} loading={savingAdminChat}>
+                复用我的个人配置
+              </Button>
+              {providerData?.globalConfigured.chat && (
+                <Button variant="ghost" size="sm" onClick={() => setPendingClearGlobal("chat")} className="text-[var(--color-danger)]">
+                  <Trash2 className="mr-1 size-4" /> 清除
+                </Button>
+              )}
+            </div>
+
+            <div className="space-y-3 max-w-md">
+              <div>
+                <Label htmlFor="admin-chat-base">Base URL</Label>
+                <Input id="admin-chat-base" type="text" value={adminChatBase} onChange={(e) => setAdminChatBase(e.target.value)} placeholder="http://api.example.com" />
+              </div>
+              <div>
+                <Label htmlFor="admin-chat-key">API Token</Label>
+                <div className="flex gap-2">
+                  <Input id="admin-chat-key" type={showKey ? "text" : "password"} value={adminChatKey} onChange={(e) => setAdminChatKey(e.target.value)} placeholder={providerData?.chatAdminDefault?.hasKey ? "已配置（输入覆盖）" : "sk-..."} />
+                  <Button variant="ghost" size="sm" onClick={() => setShowKey(!showKey)} className="shrink-0">
+                    {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </Button>
+                </div>
+              </div>
+              <ModelPicker
+                id="admin-chat-model"
+                label="聊天模型"
+                kind="chat"
+                value={adminChatModel}
+                onChange={setAdminChatModel}
+                grouped={adminChatFetchedModels}
+                onClear={() => setAdminChatFetchedModels(null)}
+                onFetch={() => handleFetchGlobalModels("chat")}
+                fetching={fetchingAdminChatModels}
+                placeholder="gpt-4o"
+                hint="已保存过 Token 时可直接点刷新，无需重填"
+              />
+              <Button onClick={handleSaveAdminChatDefault} loading={savingAdminChat} size="sm">
+                <Save className="mr-1 size-4" /> 保存全局聊天渠道
+              </Button>
+            </div>
+          </section>
+        )}
 
         {/* 存储与清理策略（仅管理员） */}
         {isAdmin && (
@@ -1153,6 +1317,25 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
         loading={savingCleanup}
         onConfirm={confirmSaveCleanup}
         onCancel={() => setPendingCleanup(null)}
+      />
+
+      {/* 清除全局配置确认。会影响所有跟随全局的用户，不是只影响自己。 */}
+      <ConfirmDialog
+        open={pendingClearGlobal !== null}
+        title={pendingClearGlobal === "image" ? "确认清除全局生图渠道" : "确认清除全局聊天渠道"}
+        description={
+          <>
+            清除后，所有勾选了「使用系统默认
+            {pendingClearGlobal === "image" ? "生图" : "聊天"}渠道」的用户将
+            {pendingClearGlobal === "image"
+              ? "降级到 Mock 模式，无法真实生图。"
+              : "回退到全局生图渠道；若它也没配置，聊天将不可用。"}
+          </>
+        }
+        confirmLabel="清除"
+        loading={clearingGlobal}
+        onConfirm={handleClearGlobal}
+        onCancel={() => setPendingClearGlobal(null)}
       />
     </>
   );

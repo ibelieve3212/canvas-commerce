@@ -13,15 +13,24 @@ export interface ProviderConfig {
 /**
  * 获取用户的 Provider 配置（优先级：用户级 > 管理员默认 > env）。
  * 如果没有任何 newapi 配置，返回 null（降级到 mock）。
+ *
+ * `useGlobalProvider` 为 true 时直接跳过用户级——这是用户在设置页
+ * 显式勾选"使用系统默认生图渠道"的结果，不能因为他残留着旧的
+ * 用户级字段就还用那套。
  */
 export async function getUserProviderConfig(userId: string): Promise<{ mode: "mock" | "newapi"; config?: ProviderConfig }> {
   // 1. 用户级配置
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { providerBaseUrl: true, providerApiKey: true, providerModel: true },
+    select: {
+      providerBaseUrl: true,
+      providerApiKey: true,
+      providerModel: true,
+      useGlobalProvider: true,
+    },
   });
 
-  if (user?.providerBaseUrl && user?.providerApiKey) {
+  if (!user?.useGlobalProvider && user?.providerBaseUrl && user?.providerApiKey) {
     return {
       mode: "newapi",
       config: {

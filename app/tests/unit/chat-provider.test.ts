@@ -55,6 +55,9 @@ beforeEach(async () => {
       chatApiKey: null,
       chatModel: null,
       chatUseImageChannel: false,
+      // 默认不跟随全局，这样测的是用户级优先级；跟随全局的场景单独设
+      useGlobalChat: false,
+      useGlobalProvider: false,
       providerBaseUrl: null,
       providerApiKey: null,
       providerModel: null,
@@ -156,5 +159,53 @@ describe.runIf(hasFixture)("getChatProviderConfig", () => {
     });
     const cfg = await getChatProviderConfig(userId);
     expect(cfg?.baseUrl).toBe("https://chat.example.com");
+  });
+
+  it("勾了'使用系统默认聊天渠道'时，用户级配置被跳过", async () => {
+    // 这是新加的显式开关。此前判断依据是"用户级字段为空即跟随全局"，
+    // 那是隐式规则：用户想切回全局就得先手动清空自己的配置。
+    await setGlobal({ chat_base_url: "https://global.example.com", chat_api_key: "sk-global" });
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        useGlobalChat: true,
+        // 用户级配置还留着，但因为勾了跟随全局，不该生效
+        chatBaseUrl: "https://mine.example.com",
+        chatApiKey: "sk-mine",
+      },
+    });
+    const cfg = await getChatProviderConfig(userId);
+    expect(cfg?.baseUrl).toBe("https://global.example.com");
+  });
+
+  it("勾了跟随全局时，'与生图渠道相同'也被跳过", async () => {
+    await setGlobal({ chat_base_url: "https://global.example.com", chat_api_key: "sk-global" });
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        useGlobalChat: true,
+        chatUseImageChannel: true,
+        providerBaseUrl: "https://img.example.com",
+        providerApiKey: "sk-img",
+      },
+    });
+    const cfg = await getChatProviderConfig(userId);
+    expect(cfg?.baseUrl).toBe("https://global.example.com");
+  });
+
+  it("跟随全局时用户仍可自选聊天模型", async () => {
+    // 渠道跟全局，但模型是个人偏好——同一渠道下换模型是常见需求
+    await setGlobal({
+      chat_base_url: "https://global.example.com",
+      chat_api_key: "sk-global",
+      chat_model: "gpt-4o",
+    });
+    await prisma.user.update({
+      where: { id: userId },
+      data: { useGlobalChat: true, chatModel: "claude-sonnet-4" },
+    });
+    const cfg = await getChatProviderConfig(userId);
+    expect(cfg?.baseUrl).toBe("https://global.example.com");
+    expect(cfg?.model).toBe("claude-sonnet-4");
   });
 });

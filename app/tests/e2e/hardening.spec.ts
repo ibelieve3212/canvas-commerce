@@ -49,10 +49,10 @@ test.describe("阶段6 加固", () => {
     await expect(page.getByText("今日剩余")).toBeVisible();
     await expect(page.getByText("总量剩余")).toBeVisible();
     await expect(page.getByRole("heading", { name: "修改密码" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Provider 配置" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "生图渠道", exact: true })).toBeVisible();
   });
 
-  test("设置页显示 Provider 配置面板", async ({ page }) => {
+  test("设置页渠道配置：勾选跟随全局时收起输入区，取消后展开", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("用户名").fill("admin");
     await page.getByLabel("密码").fill("admin123");
@@ -60,16 +60,41 @@ test.describe("阶段6 加固", () => {
     await page.waitForURL("**/apps");
 
     await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: "Provider 配置" })).toBeVisible({ timeout: 10000 });
-    await expect(page.getByLabel("Provider Base URL")).toBeVisible();
-    await expect(page.getByLabel("生图模型")).toBeVisible();
-    // 全局渠道收进了折叠区（管理员可见），展开后才有输入框。
-    // 用 #admin-base 而不是 getByLabel("API Token")——后者在用户级那块也有一个，会匹配到两个。
-    const globalToggle = page.getByRole("button", { name: /全局默认生图渠道/ });
-    await expect(globalToggle).toBeVisible();
-    await expect(page.locator("#admin-base")).toBeHidden();
-    await globalToggle.click();
+    await expect(page.getByRole("heading", { name: "生图渠道", exact: true })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("heading", { name: "聊天渠道", exact: true })).toBeVisible();
+
+    // 生图：勾选状态下输入区不渲染，取消后出现。
+    // 用 #base-url 而不是 getByLabel("Base URL")——全局块里也有同名标签。
+    const followGlobalImage = page.locator("input[type=checkbox]").first();
+    await expect(followGlobalImage).toBeChecked();
+    await expect(page.locator("#base-url")).toBeHidden();
+    await followGlobalImage.uncheck();
+    await expect(page.locator("#base-url")).toBeVisible();
+
+    // 聊天：取消跟随全局后才出现"与生图相同/自定义"两个单选
+    const followGlobalChat = page.locator("input[name=chat-source]");
+    await expect(followGlobalChat).toHaveCount(0);
+    await page.locator("input[type=checkbox]").nth(1).uncheck();
+    await expect(followGlobalChat).toHaveCount(2);
+
+    // 全局块对管理员始终可编辑（不再是折叠区），且带清除入口所需的状态徽章
     await expect(page.locator("#admin-base")).toBeVisible();
+    await expect(page.locator("#admin-chat-base")).toBeVisible();
+    await expect(page.getByRole("button", { name: "复用我的个人配置" })).toHaveCount(2);
+  });
+
+  test("普通用户看不到全局渠道配置", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel("用户名").fill("user");
+    await page.getByLabel("密码").fill("user123");
+    await page.getByRole("button", { name: "登录" }).click();
+    await page.waitForURL("**/apps");
+
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: "生图渠道", exact: true })).toBeVisible({ timeout: 10000 });
+    // 全局块整块不渲染——后端也不会把全局的 baseUrl/key 发给普通用户
+    await expect(page.getByRole("heading", { name: /全局默认/ })).toHaveCount(0);
+    await expect(page.locator("#admin-base")).toHaveCount(0);
   });
 
   test("管理员设置页可见清理策略，且展示当前阈值与影响预估", async ({ page }) => {
