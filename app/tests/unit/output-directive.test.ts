@@ -17,10 +17,16 @@ import {
 import { detailPageApp } from "@/server/applications/apps/detail-page";
 import { mainImageApp } from "@/server/applications/apps/main-image";
 import { posterApp } from "@/server/applications/apps/poster";
+import { buyerShowApp } from "@/server/applications/apps/buyer-show";
 import type { Application } from "@/contracts/application";
 
 /** 复刻 service.ts createBatch 里的逐张 prompt 组装，确保测的是真实链路 */
-function buildPrompts(app: Application, values: Record<string, unknown>, count: number) {
+function buildPrompts(
+  app: Application,
+  values: Record<string, unknown>,
+  count: number,
+  opts?: { hasPersonRef?: boolean },
+) {
   const roles: OutputRoleInfo[] =
     app.outputRoles.length > 0
       ? app.outputRoles.slice(0, count)
@@ -28,7 +34,7 @@ function buildPrompts(app: Application, values: Record<string, unknown>, count: 
           outputIndex: i + 1,
           outputRole: app.kind === "POSTER" ? `point_${i + 1}` : `variant_${i + 1}`,
           title: app.kind === "POSTER" ? `卖点海报 ${i + 1}` : `${app.name} ${i + 1}`,
-          description: "",
+          description: app.kind === "POSTER" ? "围绕分配到的单个卖点做画面主体" : "",
         }));
 
   const withCopy = applyCopyPriority(values);
@@ -37,7 +43,7 @@ function buildPrompts(app: Application, values: Record<string, unknown>, count: 
       app.promptTemplate,
       {
         ...withCopy,
-        output_directive: buildOutputDirective(role, roles.length),
+        output_directive: buildOutputDirective(role, roles.length, opts),
         point_directive: buildPointDirective(withCopy, role, roles.length),
       },
       [],
@@ -168,6 +174,66 @@ describe("多图脉络", () => {
       for (const [i, p] of prompts.entries()) {
         expect(p, `第 ${i + 1} 张缺少版式指令`).toContain("视觉基调");
       }
+    });
+  });
+
+  describe("买家秀人物一致性", () => {
+    // 用户实测：买家秀出 2 张，两张的美甲、袖口、服装都不一样。
+    // 根因是给无 outputRoles 的应用统一加了"与同组其它张明显区分开"——
+    // 对海报（每张讲不同卖点）是对的，对买家秀是反效果，模型连人一起换了。
+    // 买家秀的语义是同一个人在不同角度用同一件商品，只该变机位和场景。
+    const buyerValues = { name: "香水", category: "美妆/香水" };
+
+    it("多张时要求人物严格一致，且逐项点名易变特征", () => {
+      const prompts = buildPrompts(buyerShowApp, buyerValues, 2);
+      for (const p of prompts) {
+        expect(p).toContain("同一位人物");
+        // 只说"人物一致"模型只会保住粗粒度，细节照样漂移，必须点名
+        expect(p).toContain("美甲");
+        expect(p).toContain("配饰");
+        expect(p).toContain("服装款式与颜色");
+        expect(p).toContain("只允许机位、取景范围、姿势和场景细节发生变化");
+      }
+    });
+
+    it("不再要求买家秀'明显区分开'——那正是人物漂移的原因", () => {
+      const prompts = buildPrompts(buyerShowApp, buyerValues, 2);
+      for (const p of prompts) {
+        expect(p).not.toContain("明显区分开");
+      }
+    });
+
+    it("海报仍保留差异化诉求，不被买家秀的一致性约束波及", () => {
+      const prompts = buildPrompts(posterApp, { name: "音箱", selling_points: "续航久\n防水" }, 2);
+      for (const p of prompts) {
+        expect(p).not.toContain("同一位人物");
+      }
+      // 海报各张仍围绕不同卖点
+      expect(prompts[0]).toContain("续航久");
+      expect(prompts[1]).toContain("防水");
+    });
+
+    it("单张买家秀不加成组一致性约束", () => {
+      const [prompt] = buildPrompts(buyerShowApp, buyerValues, 1);
+      expect(prompt).not.toContain("同一位人物");
+      expect(prompt).toContain("本张定位");
+    });
+
+    it("传了参考人物图时，明确要求照着它还原而非当氛围参考", () => {
+      const withRef = buildOutputDirective(
+        { outputIndex: 1, outputRole: "variant_1", title: "买家秀 1" },
+        2,
+        { hasPersonRef: true },
+      );
+      expect(withRef).toContain("以该图为准");
+      expect(withRef).toContain("不要自行发挥");
+
+      // 没传人物图时不该出现这句
+      const without = buildOutputDirective(
+        { outputIndex: 1, outputRole: "variant_1", title: "买家秀 1" },
+        2,
+      );
+      expect(without).not.toContain("以该图为准");
     });
   });
 

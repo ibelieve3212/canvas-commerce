@@ -263,16 +263,45 @@ const roleConstraints: Record<string, string> = {
 };
 
 /**
+ * 买家秀多张时的人物一致性约束。
+ *
+ * 买家秀与海报的语义相反：海报每张讲不同卖点、应该有差异；
+ * 买家秀是同一个人在不同角度/场景用同一件商品，人物必须是同一个。
+ * 此前给无 outputRoles 的应用统一加了"与同组其它张明显区分开"，
+ * 对海报是对的，对买家秀却是反效果——模型连人一起换了
+ * （实测两张的美甲、袖口、服装都不同）。
+ *
+ * 易变特征必须逐项点名。只说"人物保持一致"模型只会保住
+ * "大概是个年轻女性"这种粗粒度，美甲、配饰这些细节照样漂移。
+ */
+const BUYER_SHOW_CONSISTENCY =
+  "同组各张是同一位人物、同一次拍摄的不同角度与瞬间：" +
+  "相貌、发型、发色、肤色、体型、妆容、美甲、指甲颜色与长度、" +
+  "配饰（戒指/手链/手表/耳饰）、服装款式与颜色必须严格保持一致，" +
+  "只允许机位、取景范围、姿势和场景细节发生变化";
+
+/** 有参考人物图时，明确要求照着它长——否则模型只把它当氛围参考。 */
+const BUYER_SHOW_PERSON_REF =
+  "已上传参考人物图时，人物的相貌、发型、肤色、体型、美甲与配饰均以该图为准，" +
+  "严格还原其人物特征，不要自行发挥";
+
+/**
  * 生成单张图的差异化指令。
  *
- * @param role      该张图的角色定义；无定义（如买家秀/海报未配 outputRoles）时返回空串
+ * @param role      该张图的角色定义；无定义时返回空串
  * @param total     本批次总张数，用于告知模型"这是第 N 张、共 M 张"
+ * @param opts      hasPersonRef: 是否上传了参考人物图（买家秀用）
  */
 export function buildOutputDirective(
   role: OutputRoleInfo | undefined,
   total: number,
+  opts?: { hasPersonRef?: boolean },
 ): string {
   if (!role) return "";
+
+  // 买家秀（variant_* 是它的兜底 role 名）要的是人物一致、机位有别，
+  // 与其它应用"内容要有区分"的诉求相反，单独走一套约束
+  const isBuyerShow = role.outputRole.startsWith("variant_");
 
   const parts: string[] = [];
   // 让模型知道自己在整组里的位置，是形成脉络（而非各画各的）的前提
@@ -283,6 +312,13 @@ export function buildOutputDirective(
   } else {
     parts.push(`本张定位：${role.title}`);
   }
+
+  if (isBuyerShow) {
+    if (total > 1) parts.push(BUYER_SHOW_CONSISTENCY);
+    if (opts?.hasPersonRef) parts.push(BUYER_SHOW_PERSON_REF);
+    return parts.join("。") + "。";
+  }
+
   if (role.description) parts.push(role.description);
 
   const constraint = roleConstraints[role.outputRole];

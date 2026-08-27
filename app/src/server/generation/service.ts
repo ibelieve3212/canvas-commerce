@@ -96,6 +96,8 @@ export async function createBatch(
   const roles = computeOutputRoles(app, input.requestedCount);
   // OPT-1: 文案优先级包装 — 注入 copy_directive 后再走 composePrompt
   const valuesWithCopy = applyCopyPriority(input.formValues);
+  // 传了参考人物图时，要明确要求照着它长，否则模型只把它当氛围参考
+  const hasPersonRef = input.referenceImages.some((r) => r.role === "person");
 
   const inputSnapshot = {
     applicationId: input.applicationId,
@@ -147,7 +149,7 @@ export async function createBatch(
       // 于是详情页 6 张全做成首屏、主图 5 张全做成吸睛图。
       const perOutputValues = {
         ...valuesWithCopy,
-        output_directive: buildOutputDirective(role, roles.length),
+        output_directive: buildOutputDirective(role, roles.length, { hasPersonRef }),
         point_directive: buildPointDirective(valuesWithCopy, role, roles.length),
       };
       const prompt = composePrompt(
@@ -215,16 +217,15 @@ function computeOutputRoles(
     return app.outputRoles.slice(0, count).map((r) => ({ ...r, description: r.description ?? "" }));
   }
   // 未声明 outputRoles 的应用（海报、买家秀）：海报按卖点轮转，
-  // role 名用 point_ 前缀让 buildPointDirective 认领；买家秀无卖点概念，
-  // 靠 buildOutputDirective 的通用差异化约束避免多张雷同。
+  // role 名用 point_ 前缀让 buildPointDirective 认领；买家秀用 variant_ 前缀，
+  // 由 buildOutputDirective 套用"人物一致、只变机位"的约束——
+  // 它与海报的"内容要有区分"诉求相反，不能共用一套兜底。
   const isPoster = app.kind === "POSTER";
   return Array.from({ length: count }, (_, i) => ({
     outputIndex: i + 1,
     outputRole: isPoster ? `point_${i + 1}` : `variant_${i + 1}`,
     title: isPoster ? `卖点海报 ${i + 1}` : `${app.name} ${i + 1}`,
-    description: isPoster
-      ? "围绕分配到的单个卖点做画面主体"
-      : "与同组其它张在构图、机位、光线上明显区分开",
+    description: isPoster ? "围绕分配到的单个卖点做画面主体" : "",
   }));
 }
 
