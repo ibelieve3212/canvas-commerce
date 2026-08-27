@@ -42,23 +42,47 @@ export function startWorker(): void {
     `[worker] 启动，provider=${env.GENERATION_PROVIDER}, queue=memory, 清理间隔=${env.CLEANUP_INTERVAL_HOURS}h`,
   );
 
+  // 同时处理多少个 Job。真正的并发上限由 provider/throttle.ts 的闸门控制
+  // （它会按 429 自适应收窄），这里只要保证"能同时喂进去足够多个"。
+  // 取闸门默认值的 2 倍：多出来的会在闸门处排队，闸门一放行就立刻顶上，
+  // 不至于因为 worker 这层不够快而让名额空转。
+  const WORKER_CONCURRENCY = 6;
+
   let processing = false;
   const poll = async () => {
     if (processing) return;
     processing = true;
     try {
       const queue = getQueue();
+      /** 正在跑的 job，用于控制同时取多少个 */
+      const running = new Set<Promise<void>>();
+
+      const runOne = (jobId: string) => {
+        console.log(`[worker] 处理 job: ${jobId}`);
+        const p = (async () => {
+          try {
+            await processJob(jobId);
+          } catch (err) {
+            console.error(`[worker] job ${jobId} 失败:`, err);
+          }
+        })().finally(() => running.delete(p));
+        running.add(p);
+      };
+
       while (true) {
+        // 名额满了先等一个完成，否则会把整个队列一次性全塞进来
+        if (running.size >= WORKER_CONCURRENCY) {
+          await Promise.race(running);
+          continue;
+        }
         const item = await queue.dequeue();
         if (!item) break;
-        const { jobId } = item as { jobId: string };
-        console.log(`[worker] 处理 job: ${jobId}`);
-        try {
-          await processJob(jobId);
-        } catch (err) {
-          console.error(`[worker] job ${jobId} 失败:`, err);
-        }
+        runOne((item as { jobId: string }).jobId);
       }
+
+      // 等这一轮取出的都跑完再释放 processing，
+      // 否则下一次 poll 会与本轮重叠、并发数翻倍
+      await Promise.all(running);
     } finally {
       processing = false;
     }
