@@ -7,8 +7,14 @@ import { getProviderForUser } from "@/server/provider";
 import { getStorage, makeObjectKey } from "@/server/storage/adapter";
 import { generateThumbnail } from "@/server/storage/thumbnail";
 import { ProviderError } from "@/server/provider/types";
-import type { ProviderReferenceImage } from "@/server/provider/types";
-import { throttleProviderRequest, markProviderRequestComplete } from "@/server/provider/throttle";
+import type { ProviderReferenceImage, ImageGenerationProvider, ProviderImageRequest, ProviderImageResult } from "@/server/provider/types";
+import {
+  throttleProviderRequest,
+  markProviderRequestComplete,
+  notifyRateLimited,
+  backoffForRateLimit,
+  getThrottleStats,
+} from "@/server/provider/throttle";
 import { env } from "@/lib/env";
 import { composePrompt, validateFormValues, applyCopyPriority, buildOutputDirective, buildPointDirective } from "@/contracts/generation";
 import type { Application } from "@/contracts/application";
@@ -290,6 +296,43 @@ async function settleQuota(batchId: string, succeededCount: number): Promise<voi
 
 // ---------- Job 处理 ----------
 
+/** 429 在同一个并发名额内退避重试的次数。超过则交给 Job 层的重试。 */
+const RATE_LIMIT_RETRIES = 3;
+
+/**
+ * 调 Provider，遇到 429 就地退避重试。
+ *
+ * 为什么在这里重试而不是丢回队列：429 是瞬时过载，退避几秒通常就好了。
+ * 丢回队列意味着重新排队、重新占名额，而且 Job 层只允许重试 2 次
+ * （那 2 次是留给真正的失败的）。就地重试还能保住已经拿到的并发名额，
+ * 不至于退回去跟其它 Job 抢。
+ *
+ * 每次 429 都会 markProviderRequestComplete("rate_limited") 让闸门收窄，
+ * 所以重试的同时并发数也在下降，双管齐下。
+ */
+async function generateWithRateLimitRetry(
+  provider: ImageGenerationProvider,
+  request: ProviderImageRequest,
+): Promise<ProviderImageResult> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await provider.generate(request);
+    } catch (err) {
+      const isRateLimited =
+        err instanceof ProviderError && err.code === "RATE_LIMITED" && err.retryable;
+      if (!isRateLimited || attempt >= RATE_LIMIT_RETRIES) throw err;
+
+      // 通知闸门收窄并发，但名额不归还——下面还要接着用
+      const s = getThrottleStats();
+      console.log(
+        `[worker] 429，退避重试（当前并发上限 ${s.limit}，在跑 ${s.active}）`,
+      );
+      notifyRateLimited();
+      await backoffForRateLimit(attempt);
+    }
+  }
+}
+
 export async function processJob(jobId: string): Promise<void> {
   const job = await prisma.generationJob.findUnique({
     where: { id: jobId },
@@ -347,10 +390,10 @@ export async function processJob(jobId: string): Promise<void> {
 
   const provider = await getProviderForUser(job.batch.userId);
   try {
-    // 节流：确保 Provider 调用间隔满足 RPM 限制
+    // 并发闸门：名额满时排队，完成一个才放下一个
     await throttleProviderRequest(provider.name);
 
-    const result = await provider.generate({
+    const result = await generateWithRateLimitRetry(provider, {
       prompt: promptData.prompt,
       aspectRatio: job.batch.aspectRatio as "1:1" | "4:5" | "3:4" | "16:9" | "9:16",
       outputFormat: "png",
@@ -358,7 +401,7 @@ export async function processJob(jobId: string): Promise<void> {
       metadata: { batchId: job.batchId, jobId: job.id, outputRole: job.outputRole },
     });
 
-    markProviderRequestComplete();
+    markProviderRequestComplete("ok");
 
     const objectKey = makeObjectKey(job.batch.userId, "png");
     const storage = getStorage();
@@ -419,8 +462,9 @@ export async function processJob(jobId: string): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     const retryable = err instanceof ProviderError ? err.retryable : false;
 
-    // Provider 调用失败也计节流时间（请求可能已到达 Provider）
-    markProviderRequestComplete();
+    // 归还并发名额。429 要如实上报，让闸门收窄并发——
+    // 这是上游过载的唯一信号，报成 ok 会让它继续以同样的并发打过去。
+    markProviderRequestComplete(code === "RATE_LIMITED" ? "rate_limited" : "ok");
 
     // 用 updateMany：Job 可能在生成期间已被删除（用户删了批次）。
     // update 会抛 P2025 冲出 catch，把一次正常的用户操作变成 worker 错误。
