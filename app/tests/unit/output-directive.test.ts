@@ -76,12 +76,27 @@ describe("多图脉络", () => {
 
   it("详情页非首屏的张次不再被要求做成首屏", () => {
     const prompts = buildPrompts(detailPageApp, detailValues, 6);
-    // 场景代入那张要明确"几乎不放文字"，这是防止退化成大杂烧的关键约束
-    expect(prompts[2]).toContain("几乎不放文字");
-    // 收尾那张文字要极少
-    expect(prompts[5]).toContain("文字极少");
+    // 场景代入以真人使用的照片为主体，不是又一张带满文案的版式图
+    expect(prompts[2]).toContain("真人在真实环境中使用商品");
+    // 收尾转化落在品牌与购买理由上，不重复前面的卖点罗列
+    expect(prompts[5]).toContain("购买理由或服务承诺");
     // 每张都要有"只做本张定位"的约束
     for (const p of prompts) expect(p).toContain("严格只做本张的定位");
+  });
+
+  it("防泄漏不等于压制文案：各模块仍要求写出该有的内容", () => {
+    // 第一版改写时用了"文字极简""文字极少"，结果首屏只剩商品名、
+    // 收尾只剩一个 logo——被压掉的是真实卖点文案，而泄漏的是模块名，
+    // 两件事互不相干。约束应正面说明该写什么。
+    const prompts = buildPrompts(detailPageApp, detailValues, 6);
+    expect(prompts[0]).toContain("主标题和一句副标题");
+    expect(prompts[1]).toContain("一行短标题和一句说明");
+    expect(prompts[3]).toContain("材质名称与工艺说明");
+    expect(prompts[4]).toContain("配必要的说明文字");
+    for (const p of prompts) {
+      expect(p).not.toContain("文字极简");
+      expect(p).not.toContain("文字极少");
+    }
   });
 
   describe("指令不能被当成文案画上去", () => {
