@@ -42,7 +42,7 @@ export const detailPageApp: Application = {
     { type: "textarea", key: "copy", label: "图片文案", required: false, placeholder: "例：夏季新品限时特惠，留空则由 AI 自动生成", maxLength: 500, defaultValue: "", group: "高级要求" },
   ],
   promptTemplate:
-    "{{ref_images}}电商详情页模块，商品 {{name}}（{{category}}），卖点 {{selling_points}}。平台 {{platform}}，市场 {{market}}，语言 {{language}}，风格 {{style}}。目标人群 {{audience}}，价格定位 {{price}}，补充 {{extra}}{{#if reference_layout}}，忽略风格选择，以已上传图片素材中“风格/版式参考图”实际风格基调为准生成详情页，商品使用商品图中的商品{{/if}}。{{copy_directive}}。{{output_directive}}上方卖点是整套详情页的全部信息，本张只取与本张定位相关的部分，不要全部堆上。保留模板排版安全区。",
-  templateVersion: 2,
+    "{{ref_images}}电商详情页模块，商品 {{name}}（{{category}}），卖点 {{selling_points}}。平台 {{platform}}，市场 {{market}}，语言 {{language}}，风格 {{style}}。目标人群 {{audience}}，价格定位 {{price}}，补充 {{extra}}。{{copy_directive}}。{{output_directive}}{{#if reference_layout}}视觉基调——色调、配色、光影、质感、排版风格——严格沿用已上传素材中的“风格/版式参考图”，忽略上面的风格选择；但画面内容与构图仍按本张定位执行，不要复制参考图里的具体主体、人物或场景。商品使用商品图中的商品。{{/if}}上方卖点是整套详情页的全部信息，本张只取与本张定位相关的部分，不要全部堆上。保留模板排版安全区。",
+  templateVersion: 3,
   isPublished: true,
 };

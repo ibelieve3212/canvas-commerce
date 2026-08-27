@@ -117,6 +117,60 @@ describe("多图脉络", () => {
     expect(prompt).toContain("本张定位");
   });
 
+  describe("同款参考版式（reference_layout）", () => {
+    // 用户实测：勾选后只有第 1 张应用了参考图版式，第 2/3 张完全没体现。
+    // 原措辞是"以参考图实际风格基调为准生成主图"，这被模型理解成
+    // "整张照着参考图做"，与"这张要做真人使用场景"的角色约束直接对撞；
+    // 加上它在 prompt 中部、角色约束在结尾，靠后的赢了。
+    // 现在改为只继承视觉基调、画面内容仍按本张定位，两者不再互斥。
+    const values = { name: "香水", category: "美妆/香水", reference_layout: true };
+
+    it("勾选后每一张都带版式指令，不只第一张", () => {
+      const prompts = buildPrompts(mainImageApp, values, 3);
+      for (const [i, p] of prompts.entries()) {
+        expect(p, `第 ${i + 1} 张缺少版式指令`).toContain("风格/版式参考图");
+      }
+    });
+
+    it("版式指令与角色定位共存，不是二选一", () => {
+      const prompts = buildPrompts(mainImageApp, values, 3);
+      // 第 2 张：既要做场景图，又要沿用参考图色调
+      expect(prompts[1]).toContain("场景主图");
+      expect(prompts[1]).toContain("视觉基调");
+      // 明确只继承基调，不复制参考图的主体——否则模型会把参考图的人和道具搬过来
+      expect(prompts[1]).toContain("不要复制参考图里的具体主体");
+      expect(prompts[1]).toContain("画面内容与构图仍按本张定位执行");
+    });
+
+    it("版式指令紧跟角色约束，不再隔一大段被压过", () => {
+      const [prompt] = buildPrompts(mainImageApp, values, 3);
+      // 位置关系是这次修复的关键：原来版式在中部、角色在结尾，
+      // 模型更重视靠后的指令，于是版式被丢掉
+      expect(prompt.indexOf("视觉基调")).toBeGreaterThan(prompt.indexOf("这是第 1 张"));
+    });
+
+    it("未勾选时不出现版式指令，风格选择正常保留", () => {
+      const prompts = buildPrompts(mainImageApp, { name: "香水", category: "美妆/香水", style: "premium" }, 3);
+      for (const p of prompts) {
+        expect(p).not.toContain("视觉基调");
+        expect(p).not.toContain("风格/版式参考图");
+        expect(p).toContain("风格 premium");
+      }
+    });
+
+    it("详情页同样对每一张生效", () => {
+      const prompts = buildPrompts(
+        detailPageApp,
+        { name: "音箱", category: "数码", selling_points: "续航久", reference_layout: true },
+        6,
+      );
+      expect(prompts).toHaveLength(6);
+      for (const [i, p] of prompts.entries()) {
+        expect(p, `第 ${i + 1} 张缺少版式指令`).toContain("视觉基调");
+      }
+    });
+  });
+
   it("所有模板的条件块闭合标签正确", () => {
     // main-image 曾写成 {{/if}（少一个花括号），条件块永不生效，
     // 且 "{{/if}" 会原样进 prompt 发给模型
