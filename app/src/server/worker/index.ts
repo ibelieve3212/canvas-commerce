@@ -30,6 +30,14 @@ const CLEANUP_STARTUP_DELAY_MS = 2 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * 同时处理多少个 Job。真正的并发上限由 provider/throttle.ts 的闸门控制
+ * （它会按 429 自适应收窄），这里只要保证"能同时喂进去足够多个"。
+ * 取闸门默认值的 2 倍：多出来的会在闸门处排队，闸门一放行就立刻顶上，
+ * 不至于因为 worker 这层不够快而让名额空转。
+ */
+const WORKER_CONCURRENCY = 6;
+
+/**
  * 启动 worker：队列轮询 + 清理 tick。
  * 幂等——重复调用只会启动一次（dev 下 HMR 可能重复触发 instrumentation）。
  */
@@ -38,15 +46,14 @@ export function startWorker(): void {
   if (g.__ccWorkerStarted) return;
   g.__ccWorkerStarted = true;
 
+  // 启动日志带上并发参数：部署后光看 "处理 job" 分不出跑的是哪版代码，
+  // 而"并发有没有生效"恰恰要靠这个判断。把值打出来，日志自己就能回答。
   console.log(
-    `[worker] 启动，provider=${env.GENERATION_PROVIDER}, queue=memory, 清理间隔=${env.CLEANUP_INTERVAL_HOURS}h`,
+    `[worker] 启动，provider=${env.GENERATION_PROVIDER}, queue=memory, ` +
+      `job 并发=${WORKER_CONCURRENCY}, 清理间隔=${env.CLEANUP_INTERVAL_HOURS}h`,
   );
 
-  // 同时处理多少个 Job。真正的并发上限由 provider/throttle.ts 的闸门控制
-  // （它会按 429 自适应收窄），这里只要保证"能同时喂进去足够多个"。
-  // 取闸门默认值的 2 倍：多出来的会在闸门处排队，闸门一放行就立刻顶上，
-  // 不至于因为 worker 这层不够快而让名额空转。
-  const WORKER_CONCURRENCY = 6;
+  // 同时处理多少个 Job 见模块顶部的 WORKER_CONCURRENCY
 
   let processing = false;
   const poll = async () => {
@@ -58,7 +65,11 @@ export function startWorker(): void {
       const running = new Set<Promise<void>>();
 
       const runOne = (jobId: string) => {
-        console.log(`[worker] 处理 job: ${jobId}`);
+        // 带时间戳与在跑数：并发是否生效光看 "处理 job" 分不出来，
+        // 三行挨着打印也可能是串行跑完一个才打下一行。
+        console.log(
+          `[worker] 处理 job: ${jobId}（${new Date().toISOString().slice(11, 23)}，在跑 ${running.size + 1}）`,
+        );
         const p = (async () => {
           try {
             await processJob(jobId);
