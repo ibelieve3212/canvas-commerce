@@ -391,6 +391,10 @@ export async function processJob(jobId: string): Promise<void> {
 
   const provider = await getProviderForUser(job.batch.userId);
   try {
+    // 打印实际解析出的 provider：worker 启动日志里的 GENERATION_PROVIDER
+    // 是个不参与决策的 env，曾误导排查。真正用哪个渠道只有这里知道，
+    // 而且它还决定要不要走并发闸门（mock 直接放行、不占名额）。
+    console.log(`[worker] job ${jobId} 使用 provider=${provider.name}`);
     // 并发闸门：名额满时排队，完成一个才放下一个
     await throttleProviderRequest(provider.name);
 

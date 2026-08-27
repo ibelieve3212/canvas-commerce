@@ -48,9 +48,14 @@ export function startWorker(): void {
 
   // 启动日志带上并发参数：部署后光看 "处理 job" 分不出跑的是哪版代码，
   // 而"并发有没有生效"恰恰要靠这个判断。把值打出来，日志自己就能回答。
+  //
+  // 不打印 GENERATION_PROVIDER：它对实际生成没有影响，真正用哪个 provider
+  // 由 getProviderForUser() 按"用户配置 > 全局配置 > env"解析，
+  // 那个 env 只用于 Job 记录里的标记。此前这里打印 provider=mock，
+  // 而实际走的是真实渠道，排查并发问题时误导了整整一轮。
   console.log(
-    `[worker] 启动，provider=${env.GENERATION_PROVIDER}, queue=memory, ` +
-      `job 并发=${WORKER_CONCURRENCY}, 清理间隔=${env.CLEANUP_INTERVAL_HOURS}h`,
+    `[worker] 启动，queue=memory, job 并发=${WORKER_CONCURRENCY}, ` +
+      `清理间隔=${env.CLEANUP_INTERVAL_HOURS}h`,
   );
 
   // 同时处理多少个 Job 见模块顶部的 WORKER_CONCURRENCY
