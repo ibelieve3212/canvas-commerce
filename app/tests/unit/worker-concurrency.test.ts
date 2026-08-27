@@ -18,9 +18,9 @@ let now = 0;
 
 const processJobMock = vi.fn(async (jobId: string) => {
   timeline.push({ id: jobId, at: now, ev: "start" });
-  // 模拟上游耗时：用真实的 setTimeout(0) 让出事件循环若干次
-  for (let i = 0; i < 5; i++) await Promise.resolve();
-  await new Promise((r) => setTimeout(r, 20));
+  // 模拟上游耗时。要足够长，否则第一个 job 在测试来得及入队后续 job 之前
+  // 就跑完了，"后续入队是否干等"这件事根本没被测到。
+  await new Promise((r) => setTimeout(r, 200));
   timeline.push({ id: jobId, at: now, ev: "end" });
 });
 
@@ -101,6 +101,41 @@ describe("worker 并发取 job", () => {
     expect(
       startsBeforeFirstEnd,
       `只有 ${startsBeforeFirstEnd} 个 job 在第一个完成前启动，说明仍是串行`,
+    ).toBe(3);
+  });
+
+  it("轮询开始后陆续入队的 job 不必等前一个跑完（回归：实测晚 34 秒）", async () => {
+    const { getQueue } = await import("@/server/queue/adapter");
+    const { startWorker } = await import("@/server/worker");
+
+    const queue = getQueue();
+    // 先入队 1 个并启动 worker，让 poll 进入循环、processing = true
+    await queue.enqueue("job-1", {});
+    startWorker();
+
+    // 等 job-1 真的开跑
+    await vi.waitFor(() => {
+      expect(timeline.filter((t) => t.ev === "start")).toHaveLength(1);
+    }, { timeout: 1000 });
+
+    // 此刻再入队两个。onEnqueue 会触发 poll，但 processing 已是 true 会被
+    // 入口守卫挡掉——若循环在队列取空时就退出，这两个只能等 3 秒兜底轮询。
+    // 实测正是如此：job1 单独跑，job2/job3 晚 34 秒（job1 的生成耗时）才开始。
+    await queue.enqueue("job-2", {});
+    await queue.enqueue("job-3", {});
+
+    await vi.waitFor(() => {
+      expect(timeline.filter((t) => t.ev === "end")).toHaveLength(3);
+    }, { timeout: 3000 });
+
+    // job-2/job-3 必须在 job-1 结束之前就启动
+    const firstEnd = timeline.findIndex((t) => t.ev === "end");
+    const startedBeforeFirstEnd = timeline
+      .slice(0, firstEnd)
+      .filter((t) => t.ev === "start").length;
+    expect(
+      startedBeforeFirstEnd,
+      `只有 ${startedBeforeFirstEnd} 个 job 在第一个完成前启动，后续入队的仍在干等`,
     ).toBe(3);
   });
 

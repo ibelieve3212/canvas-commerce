@@ -55,6 +55,13 @@ export function startWorker(): void {
 
   // 同时处理多少个 Job 见模块顶部的 WORKER_CONCURRENCY
 
+  /** 入队信号：循环空转等待时，被 onEnqueue 唤醒，不必干等 job 跑完。 */
+  let wakeUp: (() => void) | null = null;
+  const notifyEnqueued = () => {
+    wakeUp?.();
+    wakeUp = null;
+  };
+
   let processing = false;
   const poll = async () => {
     if (processing) return;
@@ -80,28 +87,49 @@ export function startWorker(): void {
         running.add(p);
       };
 
+      // 循环到"队列空且没有在跑的"为止。
+      //
+      // 不能一取空就退出：createBatch 是逐个 enqueue 的，三个 job 会触发三次
+      // onEnqueue，但第一次 poll 已把 processing 置为 true，后两次被入口的
+      // 守卫直接挡掉。若循环因队列瞬时为空而退出，剩下的 job 只能等 3 秒兜底
+      // 轮询——实测 job1 单独跑、job2/job3 晚 34 秒（正好是 job1 的生成耗时）
+      // 才一起开始。
       while (true) {
-        // 名额满了先等一个完成，否则会把整个队列一次性全塞进来
         if (running.size >= WORKER_CONCURRENCY) {
           await Promise.race(running);
           continue;
         }
         const item = await queue.dequeue();
-        if (!item) break;
-        runOne((item as { jobId: string }).jobId);
+        if (item) {
+          runOne((item as { jobId: string }).jobId);
+          continue;
+        }
+        // 队列空了，且没有在跑的 → 收工
+        if (running.size === 0) break;
+        // 还有在跑的：等"有新 job 入队"或"某个 job 结束"，谁先来都行。
+        // 只等 Promise.race(running) 是不够的——那样新入队的 job 仍要
+        // 干等一个 job 跑完才被接走，正是实测里 34 秒延迟的来源。
+        await Promise.race([
+          ...running,
+          new Promise<void>((resolve) => {
+            wakeUp = resolve;
+          }),
+        ]);
       }
-
-      // 等这一轮取出的都跑完再释放 processing，
-      // 否则下一次 poll 会与本轮重叠、并发数翻倍
-      await Promise.all(running);
     } finally {
       processing = false;
+      wakeUp = null;
     }
   };
 
   const memQueue = getMemoryQueue();
   if (memQueue) {
-    memQueue.onEnqueue(() => void poll());
+    memQueue.onEnqueue(() => {
+      // 唤醒正在空转等待的循环（poll 已在跑时 void poll() 会被守卫挡掉，
+      // 光靠它新 job 要干等一个 job 跑完才被接走）
+      notifyEnqueued();
+      void poll();
+    });
   }
   // 定期兜底轮询（防止 onEnqueue 漏触发导致任务卡在 queued）
   setInterval(() => void poll(), 3000);
