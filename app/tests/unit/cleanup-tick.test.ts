@@ -9,7 +9,7 @@
  *
  * 沙箱：dev.db 副本 + 独立 storage 临时目录，不碰真实开发数据。
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -22,6 +22,7 @@ const hasFixture = fs.existsSync(REAL_DB);
 let sandbox: string;
 let worker: typeof import("@/server/worker");
 let prisma: typeof import("@/server/db/client").prisma;
+let setCleanupPolicy: typeof import("@/server/settings/cleanup-policy").setCleanupPolicy;
 
 beforeAll(async () => {
   if (!hasFixture) return;
@@ -38,6 +39,7 @@ beforeAll(async () => {
   process.env.AUTH_SECRET ||= "test-secret-at-least-16-chars";
 
   worker = await import("@/server/worker");
+  setCleanupPolicy = (await import("@/server/settings/cleanup-policy")).setCleanupPolicy;
   prisma = (await import("@/server/db/client")).prisma;
 });
 
@@ -58,6 +60,14 @@ async function ageDays(table: "asset" | "upload" | "export", id: string, days: n
 }
 
 describe.runIf(hasFixture)("runCleanupTick 集成", () => {
+  // 每个用例前把数量上限放到足够大。用例之间共享同一个沙箱库，
+  // 而 runCleanupTick 每次都会跑完整流程（超期 + 超额），
+  // 不统一基线的话前一个用例设的上限会影响后一个的断言。
+  // 想测超额的用例自己再收紧上限。
+  beforeEach(async () => {
+    await setCleanupPolicy({ retentionDays: 3650, maxItemsPerUser: 100000 });
+  });
+
   it("宽松策略下能跑通且不误删（冒烟）", async () => {
     const before = {
       assets: await prisma.asset.count(),
@@ -66,7 +76,6 @@ describe.runIf(hasFixture)("runCleanupTick 集成", () => {
     };
     expect(before.assets).toBeGreaterThan(0);
 
-    // 默认 env 策略：30 天 / 300 张。dev 数据都是新的，应当一条不删。
     const r = await worker.runCleanupTick();
 
     expect(r.expiredAssets).toBe(0);
@@ -79,12 +88,15 @@ describe.runIf(hasFixture)("runCleanupTick 集成", () => {
   });
 
   it("超期资产连同微调子树被删，文件一并落盘删除", async () => {
+    // 保留期收到 30 天，好让下面推到 40 天前的资产算超期
+    await setCleanupPolicy({ retentionDays: 30, maxItemsPerUser: 100000 });
+
     // 找一个有微调子图的资产，把父推到 40 天前
     const parent = await prisma.asset.findFirst({
       where: { childAssets: { some: {} } },
       include: { childAssets: { select: { id: true, objectKey: true } } },
     });
-    if (!parent) return; // 无微调数据可测时跳过断言
+    if (!parent) return expect.fail("dev.db 里没有带微调子图的资产，无法验证");
 
     const childIds = parent.childAssets.map((c) => c.id);
     await ageDays("asset", parent.id, 40);
@@ -143,7 +155,6 @@ describe.runIf(hasFixture)("runCleanupTick 集成", () => {
 
   it("收紧数量上限时，实删数与预览数一致（预览/执行同源）", async () => {
     const { previewCleanupImpact } = await import("@/server/settings/cleanup-policy");
-    const { setCleanupPolicy } = await import("@/server/settings/cleanup-policy");
 
     // 挑一个持有资产最多的用户，把上限压到远低于其持有量
     const top = await prisma.asset.groupBy({
