@@ -66,29 +66,35 @@ export class CcloadProvider implements ImageGenerationProvider {
       formData.append("size", aspectRatioToSize(request.aspectRatio));
       formData.append("n", "1");
 
-      // 添加参考图（product 图作为 image 主图，与 prompt 里的编号对应）
+      // 添加参考图。OpenAI images/edits 的多图写法是重复 append 同一个
+      // 字段名 "image"（数组语义由重复决定），不是 "image[]"——
+      // 后者多数网关不认，会被整个忽略，表现为"参考图完全没生效"。
       const productImages = request.referenceImages.filter(r => r.role === "product");
       const otherImages = request.referenceImages.filter(r => r.role !== "product");
 
-      // OpenAI edits API: image 为必须的主图，可附加 image[] 额外参考
-      // 发图顺序与 prompt 中 {{ref_images}} 编号一致：product 第1张，其他按 role 顺序后续
-      if (productImages.length > 0) {
-        const img = productImages[0];
-        const ext = img.mimeType === "image/jpeg" ? "jpg" : img.mimeType === "image/webp" ? "webp" : "png";
-        formData.append("image", new Blob([new Uint8Array(img.buffer)], { type: img.mimeType }), `product.${ext}`);
-      } else {
-        // 没有 product 图，用第一张作为主图
-        const img = request.referenceImages[0];
-        const ext = img.mimeType === "image/jpeg" ? "jpg" : img.mimeType === "image/webp" ? "webp" : "png";
-        formData.append("image", new Blob([new Uint8Array(img.buffer)], { type: img.mimeType }), `image1.${ext}`);
-      }
+      // 发图顺序与 prompt 中 {{ref_images}} 的编号一致：
+      // product 第 1 张，其余按 style/person/brand 顺序在后
+      const ordered = productImages.length > 0
+        ? [productImages[0], ...otherImages]
+        : [...request.referenceImages];
 
-      // 额外参考图作为 image[] 字段，文件名带角色语义（style/person/brand）
-      for (let i = 0; i < otherImages.length && i < 3; i++) {
-        const img = otherImages[i];
-        const ext = img.mimeType === "image/jpeg" ? "jpg" : img.mimeType === "image/webp" ? "webp" : "png";
-        const roleLabel = img.role === "style" ? "style" : img.role === "person" ? "person" : img.role === "brand" ? "brand" : "ref";
-        formData.append("image[]", new Blob([new Uint8Array(img.buffer)], { type: img.mimeType }), `${roleLabel}${i}.${ext}`);
+      const extOf = (mime: string) =>
+        mime === "image/jpeg" ? "jpg" : mime === "image/webp" ? "webp" : "png";
+      const labelOf = (role: string) =>
+        role === "product" ? "product"
+          : role === "style" ? "style"
+            : role === "person" ? "person"
+              : role === "brand" ? "brand"
+                : "ref";
+
+      // 上限 4 张：主图 + 最多 3 张附加参考
+      for (let i = 0; i < ordered.length && i < 4; i++) {
+        const img = ordered[i];
+        formData.append(
+          "image",
+          new Blob([new Uint8Array(img.buffer)], { type: img.mimeType }),
+          `${labelOf(img.role)}${i + 1}.${extOf(img.mimeType)}`,
+        );
       }
 
       try {
