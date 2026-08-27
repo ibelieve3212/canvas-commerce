@@ -247,20 +247,39 @@ export interface OutputRoleInfo {
 /**
  * 各 role 的额外约束。`title`/`description` 说的是"做什么"，
  * 这里补的是"别做什么"——后者才是防止每张都退化成大杂烧的关键。
+ *
+ * ⚠️ 措辞必须是"怎么排版"，不能出现可以被当成文案抄上去的短语。
+ * 实测：`selling_points` 原本写"以 3-5 条并列卖点为主体"，图上就印出了
+ * "五大核心卖点"；`closing` 写"以品牌信任背书和购买理由收尾"，
+ * 图上就印出了"品牌信任背书"。模型分不清这是指令还是要画的字，
+ * 所以这里只描述版面结构，具体文案一律交给 copy_directive。
  */
 const roleConstraints: Record<string, string> = {
   // 详情页 6 模块
-  hero: "只呈现商品定位与一句核心利益点，文字极简，不要罗列多条卖点",
-  selling_points: "以 3-5 条并列卖点为主体，条目化排布，不要写成长段落",
-  scene: "以真实使用场景和人物情境为主体，几乎不放文字，不要罗列卖点",
-  material: "聚焦材质与工艺的局部放大特写，只标注与该细节相关的短说明",
-  function: "以参数、结构图示或效果对比来证明功能，不要重复前面的卖点文案",
-  closing: "以品牌信任背书和购买理由收尾，不要再堆商品卖点",
+  hero: "画面以商品主体为核心，配一句极简标题，不要罗列多条文字",
+  selling_points: "版面分成若干并列的小块，每块一个图标配一行短字，不要写成长段落",
+  scene: "画面是真人在真实环境中使用商品的照片，几乎不放文字",
+  material: "画面是商品材质与工艺的局部放大特写，只在旁边标一两个短词",
+  function: "用结构示意、参数标注或效果对比来表现，不要重复前面出现过的文字",
+  closing: "画面以商品与品牌标识收尾，文字极少",
   // 主图 5 类型
-  selling_point: "只突出一个最强卖点，一句短文案，不要罗列多条",
-  compare: "以使用前后或与普通版的对比构图为主体",
-  mood: "以节日/促销/季节氛围营造为主，商品融入氛围",
+  selling_point: "画面突出一个卖点，配一句短文案",
+  compare: "画面用左右或前后对比的构图",
+  mood: "画面营造节日或季节氛围，商品融入其中",
 };
+
+/**
+ * 防止指令被当成文案画上去的兜底。
+ *
+ * 上面每条约束都已改成"描述版面"而非"描述内容"，但 title、description
+ * 这些字段（如"卖点总览""收尾转化"）仍可能被模型直接印在图上，
+ * 所以再加一句显式禁止。
+ */
+const NO_META_TEXT =
+  "以上是排版要求，不是要写在图上的文字。" +
+  "图中只能出现商品本身的真实文案，" +
+  "禁止出现“卖点总览”“核心卖点”“品牌信任背书”“收尾转化”“场景代入”" +
+  "“买家秀”“卖点海报”这类描述模块用途的词，也不要出现任何编号或序号";
 
 /**
  * 买家秀多张时的人物一致性约束。
@@ -286,6 +305,19 @@ const BUYER_SHOW_PERSON_REF =
   "严格还原其人物特征，不要自行发挥";
 
 /**
+ * 商品外观保真约束。
+ *
+ * 实测：详情页的"场景代入""功能证明"两张画出的商品不是用户上传的那件。
+ * 这两张要表现"人在使用"和"结构剖析"，模型得在原图之外补画新角度，
+ * 一旦开始补画就顺手把商品本身也重绘了。
+ * 越是需要新角度的模块越要强调保真，所以这条对所有非买家秀模块都加。
+ */
+const PRODUCT_FIDELITY =
+  "画面中的商品必须与商品图完全一致：外形轮廓、比例、材质纹理、" +
+  "配色与图案细节都要严格还原，只允许改变拍摄角度、光线和所处环境，" +
+  "不要重新设计商品，不要替换成外观相似的其它产品";
+
+/**
  * 生成单张图的差异化指令。
  *
  * @param role      该张图的角色定义；无定义时返回空串
@@ -304,25 +336,32 @@ export function buildOutputDirective(
   const isBuyerShow = role.outputRole.startsWith("variant_");
 
   const parts: string[] = [];
-  // 让模型知道自己在整组里的位置，是形成脉络（而非各画各的）的前提
+  // 让模型知道自己在整组里的位置与分工，是形成脉络（而非各画各的）的前提。
+  // title 必须保留——去掉它六张就没有分工了。但要显式说明这是"用途"
+  // 而非要画的标题，否则模型会把"卖点总览"这类词直接印在图上。
   if (total > 1) {
     parts.push(
-      `本次共 ${total} 张成组输出，这是第 ${role.outputIndex} 张：${role.title}`,
+      `本次共 ${total} 张成组输出，这是第 ${role.outputIndex} 张，用途是${role.title}`,
     );
   } else {
-    parts.push(`本张定位：${role.title}`);
+    parts.push(`本张用途：${role.title}`);
   }
 
   if (isBuyerShow) {
     if (total > 1) parts.push(BUYER_SHOW_CONSISTENCY);
     if (opts?.hasPersonRef) parts.push(BUYER_SHOW_PERSON_REF);
+    parts.push(PRODUCT_FIDELITY);
+    // 买家秀是"随手拍"风格，图上冒出"买家秀 1"这种字尤其违和
+    parts.push(NO_META_TEXT);
     return parts.join("。") + "。";
   }
 
-  if (role.description) parts.push(role.description);
-
+  // role.description 同样是给人看的说明（如"3-5 个核心卖点"），
+  // 拼进 prompt 会被当成文案，所以不再注入——版面要求由 roleConstraints 表达
   const constraint = roleConstraints[role.outputRole];
   if (constraint) parts.push(constraint);
+
+  parts.push(PRODUCT_FIDELITY);
 
   if (total > 1) {
     parts.push(
@@ -330,6 +369,8 @@ export function buildOutputDirective(
         "与同组其它张保持一致的视觉风格、配色与品牌调性",
     );
   }
+
+  parts.push(NO_META_TEXT);
 
   return parts.join("。") + "。";
 }
