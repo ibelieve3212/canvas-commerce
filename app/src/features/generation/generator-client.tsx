@@ -1,10 +1,12 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { DynamicForm } from "@/features/generation/dynamic-form";
 import { ResultPanel, type StubJob, type StubJobStatus, type StubTweakNode } from "@/features/generation/result-panel";
+import { useFormDraft } from "@/features/generation/use-form-draft";
 import { validateFormValues } from "@/contracts/generation";
 import { cn } from "@/lib/cn";
 import { Loader2 } from "lucide-react";
@@ -102,9 +104,15 @@ function mapApiJobsToStubJobs(batch: ApiBatch, app: Application): StubJob[] {
 }
 
 export function GeneratorClient({ app }: { app: Application }) {
-  const [fromBatchId, setFromBatchId] = React.useState<string | null>(null);
+  // 用 useSearchParams 而不是挂载时读 window.location：从任务中心点"恢复配置"
+  // 是客户端路由跳转，组件可能先渲染、URL 后更新。用 useState 初始化器读的话
+  // 那一刻 ?fromBatch= 还不在 URL 里，会误判成"不是批次恢复"，
+  // 于是草稿抢先把批次参数覆盖掉（实测：显示的是草稿内容而非批次内容）。
+  const searchParams = useSearchParams();
+  const fromBatchId = searchParams.get("fromBatch");
 
-  const [values, setValues] = React.useState<FormValues>(() => defaultValuesFor(app));
+  const defaults = React.useMemo(() => defaultValuesFor(app), [app]);
+  const [values, setValues] = React.useState<FormValues>(defaults);
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [jobs, setJobs] = React.useState<StubJob[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
@@ -115,14 +123,29 @@ export function GeneratorClient({ app }: { app: Application }) {
   const [restoreNotice, setRestoreNotice] = React.useState<string | null>(null);
   const succeededCount = jobs.filter((j) => j.status === "succeeded").length;
 
-  // 从 URL 读取 fromBatch 参数
+  // 未提交的填写内容存本地。从历史批次恢复时不参与，避免两者打架。
+  const draft = useFormDraft(app.id, values, requestedCount, defaults, !fromBatchId);
+
+  // 从 URL 读取 fromBatch 参数（已在 useState 初始化时同步读取）
+
+  // 恢复本地草稿：用户填了一半跑去别的页面（如聊天页复制卖点），回来还在。
+  // 从历史批次恢复时跳过——那条路径有自己的参数来源，两者会互相覆盖。
+  const draftAppliedRef = React.useRef(false);
   React.useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const fb = params.get("fromBatch");
+    if (draftAppliedRef.current) return;
+    if (!draft.restored || fromBatchId) return;
+    draftAppliedRef.current = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (fb) setFromBatchId(fb);
-  }, []);
+    setValues(draft.restored.values);
+    if (draft.restored.requestedCount) setRequestedCount(draft.restored.requestedCount);
+    const at = new Date(draft.restored.savedAt).toLocaleString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    setRestoreNotice(`已恢复 ${at} 未提交的填写内容`);
+  }, [draft.restored, fromBatchId]);
 
   // 从历史批次恢复参数
   React.useEffect(() => {
@@ -265,6 +288,9 @@ export function GeneratorClient({ app }: { app: Application }) {
         return;
       }
       setBatchId(json.data.batchId);
+      // 提交成功，这份草稿已经用掉了
+      draft.clear();
+      setRestoreNotice(null);
     } catch {
       setSubmitError("网络错误，请重试");
       setSubmitting(false);
