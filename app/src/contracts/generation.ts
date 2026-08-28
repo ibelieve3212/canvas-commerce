@@ -409,26 +409,44 @@ export function buildPointDirective(
 }
 
 /**
- * 文案优先级三层逻辑（OPT-1）。
- * 包装函数：在调 composePrompt 之前，根据 copy/info/selling_points 判断走哪层，
- * 生成文案指令文本注入 values.copy_directive。
+ * 文案来源的三层判定。
  *
- * 优先级 1：用户填了 copy → "图上写这段文案：{copy}"
- * 优先级 2：填了 info/selling_points → "基于卖点信息自动生成图片文案"
- * 优先级 3：都没填 → "不要在图上写任何文字"
+ * - explicit：用户手写了文案，照原样写到图上
+ * - derived：没写文案但给了卖点/商品信息，由模型自行提炼
+ * - none：三者全空，prompt 会明确要求不写任何文字
+ *
+ * 抽出来是为了让前端能提前知道会落到哪一层——"none" 出的是纯无字图，
+ * 用户容易误以为是生成失败，需要在提交时明确告知。
  */
-export function applyCopyPriority(values: FormValues): FormValues {
+export type CopySource = "explicit" | "derived" | "none";
+
+export function classifyCopySource(values: FormValues): CopySource {
   const copy = values.copy;
   const info = values.info;
   const sellingPoints = values.selling_points;
 
-  let directive: string;
-  if (typeof copy === "string" && copy.trim() !== "") {
-    directive = `图上写这段文案：${copy}`;
-  } else if (
+  if (typeof copy === "string" && copy.trim() !== "") return "explicit";
+  if (
     (typeof info === "string" && info.trim() !== "") ||
     (typeof sellingPoints === "string" && sellingPoints.trim() !== "")
   ) {
+    return "derived";
+  }
+  return "none";
+}
+
+/**
+ * 文案优先级三层逻辑（OPT-1）。
+ * 包装函数：调 composePrompt 之前把判定结果写成指令文本，
+ * 注入 values.copy_directive。
+ */
+export function applyCopyPriority(values: FormValues): FormValues {
+  const source = classifyCopySource(values);
+
+  let directive: string;
+  if (source === "explicit") {
+    directive = `图上写这段文案：${values.copy}`;
+  } else if (source === "derived") {
     directive = "基于卖点信息自动生成图片文案";
   } else {
     directive = "不要在图上写任何文字";

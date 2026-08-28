@@ -70,6 +70,8 @@ test.describe("表单草稿暂存", () => {
     await page.goto("/apps/main-image");
     await page.getByLabel("商品名").fill("提交后应清空");
     await page.getByLabel("类目").fill("数码");
+    // 填商品信息，否则会弹"这批图不会带任何文案"确认框（该行为在 generator.spec.ts 里测）
+    await page.getByLabel("商品信息").fill("音质好、续航长");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
       name: "t.png",
       mimeType: "image/png",

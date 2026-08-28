@@ -45,6 +45,8 @@ test.describe("ACCEPTANCE 故障注入与重试", () => {
     await page.goto("/apps/main-image");
     await page.getByLabel("商品名").fill("__FAIL__测试");
     await page.getByLabel("类目").fill("服饰");
+    // 填商品信息，否则会弹"这批图不会带任何文案"确认框（该行为在 generator.spec.ts 里测）
+    await page.getByLabel("商品信息").fill("测试信息");
 
     // 上传商品图
     const productUploadBtn = page.getByRole("button", { name: /添加商品图/ });

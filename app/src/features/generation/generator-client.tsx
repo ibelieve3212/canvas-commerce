@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/input";
 import { DynamicForm } from "@/features/generation/dynamic-form";
 import { ResultPanel, type StubJob, type StubJobStatus, type StubTweakNode } from "@/features/generation/result-panel";
 import { useFormDraft } from "@/features/generation/use-form-draft";
-import { validateFormValues } from "@/contracts/generation";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { validateFormValues, classifyCopySource } from "@/contracts/generation";
 import { cn } from "@/lib/cn";
 import { Loader2 } from "lucide-react";
 import type { Application } from "@/contracts/application";
@@ -121,7 +122,22 @@ export function GeneratorClient({ app }: { app: Application }) {
   const [requestedCount, setRequestedCount] = React.useState(() => computeOutputCount(app));
   const [restoring, setRestoring] = React.useState(false);
   const [restoreNotice, setRestoreNotice] = React.useState<string | null>(null);
+  const [confirmingNoCopy, setConfirmingNoCopy] = React.useState(false);
   const succeededCount = jobs.filter((j) => j.status === "succeeded").length;
+
+  // 该应用的模板是否真的会用到文案指令。买家秀没有 {{copy_directive}}，
+  // 它的输出与文案字段无关，不该为它弹这个确认。
+  const usesCopyDirective = app.promptTemplate.includes("{{copy_directive}}");
+  const needsCopyConfirm =
+    usesCopyDirective && classifyCopySource(values) === "none";
+
+  // 提示里点名该应用实际有的那个卖点字段：详情页/海报叫「商品卖点」，
+  // 主图叫「商品信息」。说错字段名用户会去找一个不存在的输入框。
+  const copyFieldLabel = React.useMemo(() => {
+    const labelOf = (key: string) =>
+      app.formSchema.find((f) => f.key === key)?.label ?? null;
+    return labelOf("selling_points") ?? labelOf("info");
+  }, [app.formSchema]);
 
   // 未提交的填写内容存本地。从历史批次恢复时不参与，避免两者打架。
   const draft = useFormDraft(app.id, values, requestedCount, defaults, !fromBatchId);
@@ -242,6 +258,21 @@ export function GeneratorClient({ app }: { app: Application }) {
       }
       return;
     }
+
+    // 文案三个来源全空时，prompt 里会写死"不要在图上写任何文字"，
+    // 出的是纯无字图。这是设计如此，但没提示的话像是生成不完整，
+    // 用户会以为失败了又重跑一遍。只在模板真的吃 copy_directive 时才问——
+    // 买家秀没有这个占位符，对它来说填不填文案都不影响输出。
+    if (needsCopyConfirm) {
+      setConfirmingNoCopy(true);
+      return;
+    }
+
+    await doSubmit();
+  };
+
+  const doSubmit = async () => {
+    setConfirmingNoCopy(false);
     setErrors({});
     setFirstErrorKey(null);
     setSubmitError(null);
@@ -414,6 +445,29 @@ export function GeneratorClient({ app }: { app: Application }) {
           applicationId={app.id}
         />
       </div>
+
+      <ConfirmDialog
+        open={confirmingNoCopy}
+        tone="info"
+        title="这批图不会带任何文案"
+        description={
+          <>
+            <p>
+              「图片文案」
+              {copyFieldLabel ? `和「${copyFieldLabel}」` : ""}
+              都留空了，生成的会是纯画面、不带一个字的图。
+            </p>
+            <p className="mt-2">
+              想让图上出现文字：自己写「图片文案」会照原样印上去
+              {copyFieldLabel ? `，或填「${copyFieldLabel}」让 AI 自动提炼` : ""}。
+            </p>
+          </>
+        }
+        confirmLabel="就要无文案的图"
+        cancelLabel="返回填写"
+        onConfirm={() => void doSubmit()}
+        onCancel={() => setConfirmingNoCopy(false)}
+      />
     </div>
   );
 }

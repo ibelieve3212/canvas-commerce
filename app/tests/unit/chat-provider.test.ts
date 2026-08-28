@@ -10,12 +10,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { runMigrations } from "../../scripts/migrate.mjs";
-
-const REAL_DB = ".data/db/dev.db";
-const hasFixture = fs.existsSync(REAL_DB);
+import { createSandbox, hasFixture } from "../fixtures/sandbox";
 
 let sandbox: string;
 let getChatProviderConfig: typeof import("@/server/chat/provider").getChatProviderConfig;
@@ -24,12 +20,11 @@ let userId: string;
 
 beforeAll(async () => {
   if (!hasFixture) return;
-  sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "cc-chat-"));
-  const dbPath = path.join(sandbox, "test.db");
-  fs.copyFileSync(REAL_DB, dbPath);
-  runMigrations(dbPath, "prisma/migrations", () => {});
+  const sb = createSandbox("cc-chat-", false);
+  sandbox = sb.root;
+  runMigrations(sb.dbPath, "prisma/migrations", () => {});
 
-  process.env.DATABASE_URL = `file:${dbPath}`;
+  process.env.DATABASE_URL = `file:${sb.dbPath}`;
   process.env.AUTH_SECRET ||= "test-secret-at-least-16-chars";
   // 清掉 env 兜底，否则测不出"确实没渠道"的分支
   process.env.CCLOAD_NEW_API_BASE_URL = "";

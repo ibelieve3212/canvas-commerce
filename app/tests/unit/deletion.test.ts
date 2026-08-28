@@ -17,15 +17,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 // 用项目自己的 migrate runner 应用 migration，顺带验证新 migration
 // 能走通真实部署路径（docker-entrypoint 跑的就是这个脚本）
 import { runMigrations } from "../../scripts/migrate.mjs";
-
-const REAL_DB = ".data/db/dev.db";
-const REAL_STORAGE = ".data/storage";
-
-const hasFixture = fs.existsSync(REAL_DB);
+import { createSandbox, hasFixture } from "../fixtures/sandbox";
 
 let sandbox: string;
 let queries: typeof import("@/server/generation/queries");
@@ -35,18 +30,15 @@ let prisma: typeof import("@/server/db/client").prisma;
 beforeAll(async () => {
   if (!hasFixture) return;
 
-  sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "cc-del-"));
-  const dbPath = path.join(sandbox, "test.db");
-  const storagePath = path.join(sandbox, "storage");
-  fs.copyFileSync(REAL_DB, dbPath);
-  fs.cpSync(REAL_STORAGE, storagePath, { recursive: true });
+  const sb = createSandbox("cc-del-");
+  sandbox = sb.root;
 
   // 副本已应用到上一个 migration，这里只会跑新增的那个
-  runMigrations(dbPath, "prisma/migrations", () => {});
+  runMigrations(sb.dbPath, "prisma/migrations", () => {});
 
   // env 在模块加载时读取，必须先设置再 import
-  process.env.DATABASE_URL = `file:${dbPath}`;
-  process.env.STORAGE_LOCAL_PATH = storagePath;
+  process.env.DATABASE_URL = `file:${sb.dbPath}`;
+  process.env.STORAGE_LOCAL_PATH = sb.storagePath;
   process.env.AUTH_SECRET ||= "test-secret-at-least-16-chars";
 
   queries = await import("@/server/generation/queries");

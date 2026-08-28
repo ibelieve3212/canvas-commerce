@@ -12,12 +12,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { runMigrations } from "../../scripts/migrate.mjs";
-
-const REAL_DB = ".data/db/dev.db";
-const REAL_STORAGE = ".data/storage";
-const hasFixture = fs.existsSync(REAL_DB);
+import { createSandbox, hasFixture } from "../fixtures/sandbox";
 
 let sandbox: string;
 let worker: typeof import("@/server/worker");
@@ -27,15 +23,12 @@ let setCleanupPolicy: typeof import("@/server/settings/cleanup-policy").setClean
 beforeAll(async () => {
   if (!hasFixture) return;
 
-  sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "cc-tick-"));
-  const dbPath = path.join(sandbox, "test.db");
-  const storagePath = path.join(sandbox, "storage");
-  fs.copyFileSync(REAL_DB, dbPath);
-  fs.cpSync(REAL_STORAGE, storagePath, { recursive: true });
-  runMigrations(dbPath, "prisma/migrations", () => {});
+  const sb = createSandbox("cc-tick-");
+  sandbox = sb.root;
+  runMigrations(sb.dbPath, "prisma/migrations", () => {});
 
-  process.env.DATABASE_URL = `file:${dbPath}`;
-  process.env.STORAGE_LOCAL_PATH = storagePath;
+  process.env.DATABASE_URL = `file:${sb.dbPath}`;
+  process.env.STORAGE_LOCAL_PATH = sb.storagePath;
   process.env.AUTH_SECRET ||= "test-secret-at-least-16-chars";
 
   worker = await import("@/server/worker");

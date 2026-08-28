@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * 危险操作二次确认对话框。
+ * 操作二次确认对话框。
  *
- * 项目里所有删除确认统一走这里——原先四个入口各用原生 `confirm()`，
+ * 项目里所有确认统一走这里——原先四个入口各用原生 `confirm()`，
  * 只有管理员存储页是自定义弹窗，交互与措辞都不一致。
  * 详见 `docs/v2/12-DELETION-REFACTOR.md` 第 4 步。
  *
@@ -11,7 +11,7 @@
  * 且会阻塞事件循环——Playwright 默认自动 dismiss，导致删除用例静默空跑。
  */
 import * as React from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export interface ConfirmDialogProps {
@@ -22,6 +22,11 @@ export interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   loading?: boolean;
+  /**
+   * 语气。danger 用于不可逆操作（删除），info 用于"结果可能不符合预期"
+   * 这类事先告知——后者不该套红色警告三角，否则真正危险的操作被稀释了。
+   */
+  tone?: "danger" | "info";
   /**
    * 要求用户逐字输入此文本才能确认。用于影响面大的操作（如管理员批量删除）。
    * 留空则只需点确认。
@@ -44,6 +49,7 @@ function ConfirmDialogInner({
   confirmLabel = "删除",
   cancelLabel = "取消",
   loading = false,
+  tone = "danger",
   requireTypedText,
   onConfirm,
   onCancel,
@@ -83,8 +89,12 @@ function ConfirmDialogInner({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center gap-2">
-          {/* 图标只作视觉强化，危险语义同时由标题文字和按钮文案承载（不靠颜色传达状态） */}
-          <AlertTriangle aria-hidden className="size-5 text-[var(--color-danger)]" />
+          {/* 图标只作视觉强化，语义同时由标题文字和按钮文案承载（不靠颜色传达状态） */}
+          {tone === "danger" ? (
+            <AlertTriangle aria-hidden className="size-5 text-[var(--color-danger)]" />
+          ) : (
+            <Info aria-hidden className="size-5 text-[var(--color-accent)]" />
+          )}
           <h3 id="confirm-dialog-title" className="text-sm font-semibold text-[var(--color-text)]">
             {title}
           </h3>
@@ -120,7 +130,7 @@ function ConfirmDialogInner({
           </Button>
           <Button
             ref={confirmRef}
-            variant="danger"
+            variant={tone === "danger" ? "danger" : "primary"}
             size="sm"
             loading={loading}
             disabled={!canConfirm}

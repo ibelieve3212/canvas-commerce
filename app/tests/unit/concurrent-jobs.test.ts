@@ -9,12 +9,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { runMigrations } from "../../scripts/migrate.mjs";
-
-const REAL_DB = ".data/db/dev.db";
-const hasFixture = fs.existsSync(REAL_DB);
+import { createSandbox, hasFixture } from "../fixtures/sandbox";
 
 let sandbox: string;
 let prisma: typeof import("@/server/db/client").prisma;
@@ -22,14 +18,12 @@ let service: typeof import("@/server/generation/service");
 
 beforeAll(async () => {
   if (!hasFixture) return;
-  sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "cc-conc-"));
-  const dbPath = path.join(sandbox, "test.db");
-  fs.copyFileSync(REAL_DB, dbPath);
-  fs.mkdirSync(path.join(sandbox, "storage"), { recursive: true });
-  runMigrations(dbPath, "prisma/migrations", () => {});
+  const sb = createSandbox("cc-conc-", false);
+  sandbox = sb.root;
+  runMigrations(sb.dbPath, "prisma/migrations", () => {});
 
-  process.env.DATABASE_URL = `file:${dbPath}`;
-  process.env.STORAGE_LOCAL_PATH = path.join(sandbox, "storage");
+  process.env.DATABASE_URL = `file:${sb.dbPath}`;
+  process.env.STORAGE_LOCAL_PATH = sb.storagePath;
   process.env.AUTH_SECRET ||= "test-secret-at-least-16-chars";
   process.env.GENERATION_PROVIDER = "mock";
 
