@@ -25,32 +25,6 @@ export function resolveApplication(applicationId: string): Application | undefin
   return getApplicationById(applicationId);
 }
 
-// ---------- 配额 ----------
-
-export async function getOrCreateQuota(userId: string) {
-  const today = new Date().toISOString().slice(0, 10);
-  let quota = await prisma.userQuota.findUnique({ where: { userId } });
-  if (!quota) {
-    quota = await prisma.userQuota.create({
-      data: {
-        userId,
-        dailyLimit: env.QUOTA_DAILY_DEFAULT,
-        totalQuota: env.QUOTA_TOTAL_DEFAULT,
-        maxConcurrency: env.QUOTA_MAX_CONCURRENCY_DEFAULT,
-        dailyDate: today,
-      },
-    });
-  }
-  // 跨天重置
-  if (quota.dailyDate !== today) {
-    quota = await prisma.userQuota.update({
-      where: { userId },
-      data: { dailyUsed: 0, dailyDate: today },
-    });
-  }
-  return quota;
-}
-
 // ---------- 批次创建 ----------
 
 export interface CreateBatchInput {
@@ -84,15 +58,6 @@ export async function createBatch(
     throw new Error("VALIDATION_FAILED:" + JSON.stringify(validation.errors));
   }
 
-  // 配额预检
-  const quota = await getOrCreateQuota(input.userId);
-  if (
-    quota.dailyLimit - quota.dailyUsed < input.requestedCount ||
-    quota.totalQuota - quota.totalUsed < input.requestedCount
-  ) {
-    throw new Error("QUOTA_EXCEEDED");
-  }
-
   const roles = computeOutputRoles(app, input.requestedCount);
   // OPT-1: 文案优先级包装 — 注入 copy_directive 后再走 composePrompt
   const valuesWithCopy = applyCopyPriority(input.formValues);
@@ -119,15 +84,6 @@ export async function createBatch(
   };
 
   const batch = await prisma.$transaction(async (tx) => {
-    const q = await tx.userQuota.findUnique({ where: { userId: input.userId } });
-    if (!q) throw new Error("QUOTA_NOT_FOUND");
-    if (
-      q.dailyLimit - q.dailyUsed < input.requestedCount ||
-      q.totalQuota - q.totalUsed < input.requestedCount
-    ) {
-      throw new Error("QUOTA_EXCEEDED");
-    }
-
     const b = await tx.generationBatch.create({
       data: {
         userId: input.userId,
@@ -177,23 +133,6 @@ export async function createBatch(
         },
       });
     }
-
-    await tx.userQuota.update({
-      where: { userId: input.userId },
-      data: {
-        dailyUsed: { increment: input.requestedCount },
-        totalUsed: { increment: input.requestedCount },
-      },
-    });
-
-    await tx.quotaReservation.create({
-      data: {
-        userId: input.userId,
-        batchId: b.id,
-        reservedCount: input.requestedCount,
-        status: "PENDING",
-      },
-    });
 
     return b;
   });
@@ -270,31 +209,6 @@ export async function recomputeBatchStatus(batchId: string): Promise<void> {
   }
 
   await prisma.generationBatch.update({ where: { id: batchId }, data: update });
-
-  if (["completed", "failed", "partial", "canceled"].includes(status)) {
-    await settleQuota(batchId, succeeded);
-  }
-}
-
-async function settleQuota(batchId: string, succeededCount: number): Promise<void> {
-  const reservation = await prisma.quotaReservation.findUnique({ where: { batchId } });
-  if (!reservation || reservation.status !== "PENDING") return;
-
-  const toRelease = reservation.reservedCount - succeededCount;
-  if (toRelease > 0) {
-    await prisma.userQuota.update({
-      where: { userId: reservation.userId },
-      data: {
-        dailyUsed: { decrement: toRelease },
-        totalUsed: { decrement: toRelease },
-      },
-    });
-  }
-
-  await prisma.quotaReservation.update({
-    where: { id: reservation.id },
-    data: { settledCount: succeededCount, status: "SETTLED", settledAt: new Date() },
-  });
 }
 
 // ---------- Job 处理 ----------

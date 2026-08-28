@@ -40,12 +40,9 @@ export async function POST(
     if (msg === "TWEAK_LIMIT_EXCEEDED") {
       return NextResponse.json({ error: { code: "TWEAK_LIMIT", message: "已达到微调上限（3 轮），建议重新生成" }, requestId }, { status: 429 });
     }
-    if (msg === "QUOTA_EXCEEDED") {
-      return NextResponse.json({ error: { code: "QUOTA_EXCEEDED", message: "配额不足" }, requestId }, { status: 429 });
-    }
     if (msg === "REFERENCE_IMAGE_MISSING") {
       // 原始商品图已被自动清理（超保留期或超数量上限）。
-      // 宁可报错也不静默降级：降级会白扣配额且效果变差，用户无法得知原因。
+      // 宁可报错也不静默降级：降级会让效果变差，而用户无法得知原因。
       return NextResponse.json(
         {
           error: {

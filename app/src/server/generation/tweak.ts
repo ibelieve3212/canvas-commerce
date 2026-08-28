@@ -1,15 +1,14 @@
 /**
  * 微调 Service（OPT-1）。
  *
- * 流程：找回产品图 → 拼 prompt（生成图作 image + 产品图作 image[] + 微调描述）→
- * 调 provider edits → 存新 Asset（parentAssetId 指向原图）→ 扣配额 → 轮次检查。
+ * 流程：轮次检查 → 找回产品图 → 拼 prompt（生成图作 image + 产品图作 image[] +
+ * 微调描述）→ 调 provider edits → 存新 Asset（parentAssetId 指向原图）。
  */
 import { prisma } from "@/server/db/client";
 import { getStorage, makeObjectKey } from "@/server/storage/adapter";
 import { generateThumbnail } from "@/server/storage/thumbnail";
 import { getProviderForUser } from "@/server/provider";
 import type { ProviderReferenceImage } from "@/server/provider/types";
-import { getOrCreateQuota } from "@/server/generation/service";
 
 const MAX_TWEAK_DEPTH = 3;
 
@@ -41,7 +40,7 @@ async function getTweakDepth(assetId: string): Promise<number> {
  *
  * 返回 `missing` 计数：快照里记了 uploadId 但 Upload 记录已不在（被自动清理）。
  * `inputSnapshotJson` 里的 uploadId 是 JSON 文本，无外键约束，所以上传图被清理后
- * 这里会查不到。旧实现是静默跳过——微调照样扣配额、照样出图，但已不参考
+ * 这里会查不到。旧实现是静默跳过——照样出图，但已不参考
  * 原始商品图，用户看不出为什么效果变差。现在交由调用方明确报错。
  */
 async function findProductImages(
@@ -120,19 +119,13 @@ export async function tweakAsset(
     throw new Error("TWEAK_LIMIT_EXCEEDED");
   }
 
-  // 3. 扣配额
-  const quota = await getOrCreateQuota(userId);
-  if (quota.dailyLimit - quota.dailyUsed < 1 || quota.totalQuota - quota.totalUsed < 1) {
-    throw new Error("QUOTA_EXCEEDED");
-  }
-
-  // 4. 读原图二进制
+  // 3. 读原图二进制
   const storage = getStorage();
   const originalBuffer = await storage.get(asset.objectKey);
 
-  // 5. 找回产品图（最多 4 张，作为 image[]）
-  //    参考图被自动清理掉时必须报错：静默降级会让用户白扣一次配额，
-  //    拿到一张没参考原商品图的结果，而且无法得知原因。
+  // 4. 找回产品图（最多 4 张，作为 image[]）
+  //    参考图被自动清理掉时必须报错：静默降级会让用户拿到一张
+  //    没参考原商品图的结果，而且无法得知原因。
   const { images: productImages, missing: missingRefs } = await findProductImages(assetId);
   if (missingRefs > 0) {
     throw new Error("REFERENCE_IMAGE_MISSING");
@@ -163,10 +156,10 @@ export async function tweakAsset(
     });
   }
 
-  // 6. 拼 prompt
+  // 5. 拼 prompt
   const prompt = `基于当前图片进行微调。用户的需求是：${description}。请保留原图的整体风格和布局，只做局部调整。`;
 
-  // 7. 调 Provider
+  // 6. 调 Provider
   const provider = await getProviderForUser(userId);
   const result = await provider.generate({
     prompt,
@@ -176,7 +169,7 @@ export async function tweakAsset(
     metadata: { batchId: "", jobId: "", outputRole: "tweak" },
   });
 
-  // 8. 存新 Asset
+  // 7. 存新 Asset
   const objectKey = makeObjectKey(userId, "png");
   await storage.put(objectKey, result.imageBuffer);
 
@@ -199,15 +192,6 @@ export async function tweakAsset(
         tweakDescription: description,
         tweakDepth: depth + 1,
       }),
-    },
-  });
-
-  // 9. 扣减配额
-  await prisma.userQuota.update({
-    where: { userId },
-    data: {
-      dailyUsed: { increment: 1 },
-      totalUsed: { increment: 1 },
     },
   });
 

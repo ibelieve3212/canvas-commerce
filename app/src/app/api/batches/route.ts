@@ -53,12 +53,6 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    if (msg === "QUOTA_EXCEEDED") {
-      return NextResponse.json(
-        { error: { code: "QUOTA_EXCEEDED", message: "配额不足" }, requestId },
-        { status: 429 },
-      );
-    }
     if (msg === "APPLICATION_NOT_FOUND") {
       return NextResponse.json(
         { error: { code: "NOT_FOUND", message: "应用不存在" }, requestId },

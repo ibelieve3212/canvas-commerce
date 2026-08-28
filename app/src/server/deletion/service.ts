@@ -114,36 +114,6 @@ async function resolveBatchIds(nodes: AssetNode[]): Promise<string[]> {
   return [...new Set(jobs.map((j) => j.batchId))];
 }
 
-/**
- * 结算未完成的配额预占。
- *
- * createBatch 按 requestedCount 预扣配额，靠 settleQuota 在批次跑完时退还未用部分。
- * 批次删除后 reservation 被外键 Cascade 带走，settleQuota 再没有机会执行，
- * 所以删除前必须在同一事务里补上——否则删掉一个排队中的批次会永久吞掉用户配额。
- *
- * 只退还未产出的部分：已成功的图消耗了真实的 Provider 调用，
- * 删本地文件不会把它退回来（否则删了重生成就能无限刷额度）。
- */
-async function releasePendingReservation(
-  tx: Prisma.TransactionClient,
-  batchId: string,
-  succeededCount: number,
-): Promise<void> {
-  const reservation = await tx.quotaReservation.findUnique({ where: { batchId } });
-  if (!reservation || reservation.status !== "PENDING") return;
-
-  const toRelease = reservation.reservedCount - succeededCount;
-  if (toRelease > 0) {
-    await tx.userQuota.update({
-      where: { userId: reservation.userId },
-      data: {
-        dailyUsed: { decrement: toRelease },
-        totalUsed: { decrement: toRelease },
-      },
-    });
-  }
-}
-
 // ── 导出的删除原语 ──
 
 /**
@@ -170,16 +140,16 @@ export async function deleteAssetSubtrees(
 }
 
 /**
- * 彻底删除批次：配额结算 → 事务内删记录 → 事务提交后删文件。
+ * 彻底删除批次：事务内删记录 → 事务提交后删文件。
  * 幂等：批次已不存在时静默返回。归属校验由调用方负责。
  *
- * Job 与 QuotaReservation 由外键 Cascade 带走；Asset 必须显式删——
+ * Job 由外键 Cascade 带走；Asset 必须显式删——
  * Asset.jobId 是 SET NULL，光删批次只会把 Asset 变成无主孤儿。
  */
 export async function deleteBatchCascade(batchId: string): Promise<void> {
   const batch = await prisma.generationBatch.findUnique({
     where: { id: batchId },
-    select: { succeededCount: true },
+    select: { id: true },
   });
   if (!batch) return;
 
@@ -192,7 +162,6 @@ export async function deleteBatchCascade(batchId: string): Promise<void> {
   );
 
   await prisma.$transaction(async (tx) => {
-    await releasePendingReservation(tx, batchId, batch.succeededCount);
     await deleteAssetRecords(tx, nodes);
     await tx.generationBatch.delete({ where: { id: batchId } });
   });

@@ -4,12 +4,9 @@ import { prisma } from "@/server/db/client";
 import { getCurrentUser, hashPassword, invalidateAllSessions } from "@/server/auth/session";
 
 const PatchBody = z.object({
-  action: z.enum(["reset_password", "toggle_status", "update_quota"]),
+  action: z.enum(["reset_password", "toggle_status"]),
   password: z.string().min(6).max(200).optional(),
   status: z.enum(["ACTIVE", "SUSPENDED"]).optional(),
-  dailyLimit: z.number().int().min(0).optional(),
-  totalQuota: z.number().int().min(0).optional(),
-  maxConcurrency: z.number().int().min(1).optional(),
 });
 
 export async function PATCH(
@@ -32,9 +29,9 @@ export async function PATCH(
     const target = await prisma.user.findUnique({ where: { id: userId } });
     if (!target) return NextResponse.json({ error: { code: "NOT_FOUND", message: "用户不存在" }, requestId }, { status: 404 });
 
-    // 不可停用自己
-    if (userId === currentUser.id && parsed.data.action !== "update_quota") {
-      return NextResponse.json({ error: { code: "SELF_FORBIDDEN", message: "不能对自己执行此操作" }, requestId }, { status: 409 });
+    // 不可停用自己，也不能给自己重置密码（改自己的密码走 /settings）
+    if (userId === currentUser.id) {
+      return NextResponse.json({ error: { code: "SELF_FORBIDDEN", message: "不能对自己执行此操作，改自己的密码请去设置页" }, requestId }, { status: 409 });
     }
 
     switch (parsed.data.action) {
@@ -65,38 +62,6 @@ export async function PATCH(
           action: "toggle_status",
           targetUserId: userId,
           newStatus,
-          at: new Date().toISOString(),
-        });
-        break;
-      }
-      case "update_quota": {
-        const data: Record<string, number> = {};
-        if (parsed.data.dailyLimit !== undefined) data.dailyLimit = parsed.data.dailyLimit;
-        if (parsed.data.totalQuota !== undefined) data.totalQuota = parsed.data.totalQuota;
-        if (parsed.data.maxConcurrency !== undefined) data.maxConcurrency = parsed.data.maxConcurrency;
-        if (Object.keys(data).length === 0) {
-          return NextResponse.json({ error: { code: "INVALID_INPUT", message: "缺少配额字段" }, requestId }, { status: 400 });
-        }
-        // upsert quota
-        const existing = await prisma.userQuota.findUnique({ where: { userId } });
-        if (existing) {
-          await prisma.userQuota.update({ where: { userId }, data });
-        } else {
-          await prisma.userQuota.create({
-            data: {
-              userId,
-              dailyLimit: data.dailyLimit ?? 20,
-              totalQuota: data.totalQuota ?? 100,
-              maxConcurrency: data.maxConcurrency ?? 2,
-              dailyDate: new Date().toISOString().slice(0, 10),
-            },
-          });
-        }
-        // 审计日志（P1：管理员调整额度有日志记录）
-        console.info(`[AUDIT] admin=${currentUser.id} updated_quota user=${userId}`, {
-          action: "update_quota",
-          targetUserId: userId,
-          changes: data,
           at: new Date().toISOString(),
         });
         break;

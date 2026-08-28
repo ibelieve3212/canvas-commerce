@@ -19,13 +19,6 @@ interface UserRow {
   role: "USER" | "ADMIN";
   status: "ACTIVE" | "SUSPENDED";
   createdAt: string;
-  quota: {
-    dailyLimit: number;
-    totalQuota: number;
-    maxConcurrency: number;
-    dailyUsed: number;
-    totalUsed: number;
-  } | null;
 }
 
 export default function AdminUsersPage() {
@@ -53,7 +46,7 @@ export default function AdminUsersPage() {
 
   return (
     <>
-      <PageHeader title="用户管理" description="创建用户、重置密码、停用与额度调整" />
+      <PageHeader title="用户管理" description="创建用户、重置密码与停用" />
 
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1 max-w-xs">
@@ -97,15 +90,13 @@ export default function AdminUsersPage() {
                 <th className="px-3 py-2.5 text-left font-medium">用户名</th>
                 <th className="px-3 py-2.5 text-left font-medium">角色</th>
                 <th className="px-3 py-2.5 text-left font-medium">状态</th>
-                <th className="px-3 py-2.5 text-right font-medium">日额度</th>
-                <th className="px-3 py-2.5 text-right font-medium">总额度</th>
                 <th className="px-3 py-2.5 text-right font-medium">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--color-border)]">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-sm text-[var(--color-text-muted)]">
+                  <td colSpan={5} className="px-3 py-8 text-center text-sm text-[var(--color-text-muted)]">
                     没有匹配「{search}」的用户
                   </td>
                 </tr>
@@ -201,8 +192,8 @@ function UserRowItem({ user, onChanged }: { user: UserRow; onChanged: () => void
   const [newPass, setNewPass] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
-  // 这一行就是当前登录的管理员自己。后端对自己只放行 update_quota，
-  // 重置密码和停用都会 409（停用自己等于把自己锁在门外）。
+  // 这一行就是当前登录的管理员自己。后端对自己一律 409
+  // （停用自己等于把自己锁在门外，重置密码也没必要走这条路）。
   // 按钮照常渲染的话点了必然报错，所以直接指向设置页——改自己的密码在那儿。
   const isSelf = currentUser?.id === user.id;
 
@@ -243,12 +234,6 @@ function UserRowItem({ user, onChanged }: { user: UserRow; onChanged: () => void
         ) : (
           <Badge variant="danger">已停用</Badge>
         )}
-      </td>
-      <td className="px-3 py-2.5 text-right text-[var(--color-text-muted)]">
-        {user.quota ? `${user.quota.dailyUsed}/${user.quota.dailyLimit}` : "—"}
-      </td>
-      <td className="px-3 py-2.5 text-right text-[var(--color-text-muted)]">
-        {user.quota ? `${user.quota.totalUsed}/${user.quota.totalQuota}` : "—"}
       </td>
       <td className="px-3 py-2.5">
         <div className="flex items-center justify-end gap-1">

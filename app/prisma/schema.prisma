@@ -57,8 +57,6 @@ model User {
   batches      GenerationBatch[]
   assets       Asset[]
   exports      Export[]
-  quota        UserQuota?
-  reservations QuotaReservation[]
   sessions     Session[]
   chatConversations ChatConversation[]
   @@index([username])
@@ -198,7 +196,6 @@ model GenerationBatch {
   childBatches GenerationBatch[] @relation("BatchVersionChain")
   jobs         GenerationJob[]
   exports      Export[]
-  reservation  QuotaReservation?
 
   @@unique([userId, idempotencyKey])
   @@index([userId])
@@ -300,46 +297,6 @@ model Export {
 
   @@index([userId])
   @@index([batchId])
-}
-
-// ============ 配额 ============
-
-model UserQuota {
-  userId         String   @id
-  dailyLimit     Int      @default(20)
-  totalQuota     Int      @default(100)
-  maxConcurrency Int      @default(2)
-  dailyUsed      Int      @default(0)
-  totalUsed      Int      @default(0)
-  dailyDate      String
-  updatedAt      DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([dailyDate])
-}
-
-enum ReservationStatus {
-  PENDING
-  SETTLED
-  RELEASED
-}
-
-model QuotaReservation {
-  id            String            @id @default(cuid())
-  userId        String
-  batchId       String            @unique
-  reservedCount Int
-  settledCount  Int               @default(0)
-  status        ReservationStatus @default(PENDING)
-  createdAt     DateTime          @default(now())
-  settledAt     DateTime?
-
-  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  batch GenerationBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([status])
 }
 
 // ============ 聊天助手 ============

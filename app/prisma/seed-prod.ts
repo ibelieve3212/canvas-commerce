@@ -81,19 +81,7 @@ async function ensureAdmin() {
     },
   });
 
-  await prisma.userQuota.upsert({
-    where: { userId: user.id },
-    update: {},
-    create: {
-      userId: user.id,
-      dailyLimit: 999,
-      totalQuota: 9999,
-      maxConcurrency: 10,
-      dailyDate: new Date().toISOString().slice(0, 10),
-    },
-  });
-
-  console.log(`[seed] 已创建管理员账号：${username}`);
+  console.log(`[seed] 已创建管理员账号：${username}（id=${user.id}）`);
   if (password === DEFAULT_ADMIN_PASSWORD) {
     console.log("");
     console.log("  ╔══════════════════════════════════════════════════╗");

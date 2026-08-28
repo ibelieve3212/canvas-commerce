@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/server/db/client";
 import { getCurrentUser, hashPassword } from "@/server/auth/session";
-import { env } from "@/lib/env";
 import { UsernameSchema } from "@/contracts/user";
 
 const Body = z.object({
@@ -28,9 +27,6 @@ export async function GET() {
       status: true,
       sessionVersion: true,
       createdAt: true,
-      quota: {
-        select: { dailyLimit: true, totalQuota: true, maxConcurrency: true, dailyUsed: true, totalUsed: true },
-      },
     },
   });
   return NextResponse.json({ data: users, requestId });
@@ -56,7 +52,6 @@ export async function POST(req: NextRequest) {
     }
 
     const hash = await hashPassword(password);
-    const today = new Date().toISOString().slice(0, 10);
     const newUser = await prisma.user.create({
       data: {
         username,
@@ -64,14 +59,6 @@ export async function POST(req: NextRequest) {
         passwordHash: hash,
         role,
         status: "ACTIVE",
-        quota: {
-          create: {
-            dailyLimit: env.QUOTA_DAILY_DEFAULT,
-            totalQuota: env.QUOTA_TOTAL_DEFAULT,
-            maxConcurrency: env.QUOTA_MAX_CONCURRENCY_DEFAULT,
-            dailyDate: today,
-          },
-        },
       },
       select: { id: true, username: true, name: true, role: true, status: true, createdAt: true },
     });

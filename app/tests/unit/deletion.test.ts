@@ -9,11 +9,10 @@
  * 全程在沙箱里跑：DB 是 dev.db 的副本、storage 是独立临时目录，
  * 绝不触碰 .data 下的真实开发数据。
  *
- * 覆盖第 1 步修复的四个点：
- * 1. migration 后批次能删掉（旧代码被 QuotaReservation 的 FK RESTRICT 挡死）
- * 2. 删除是事务化的，且文件在事务提交后才删
- * 3. PENDING reservation 的批次删除前退还未用配额
- * 4. 删资产后批次计数重算
+ * 覆盖第 1 步修复的三个点：
+ * 1. 删除是事务化的，且文件在事务提交后才删
+ * 2. 删资产后批次计数重算
+ * 3. 上传图与缩略图一并落盘删除
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
@@ -61,51 +60,39 @@ afterAll(async () => {
 });
 
 describe.runIf(hasFixture)("批次与资产删除", () => {
-  it("QuotaReservation.batchId 的外键是 CASCADE 而非 RESTRICT", async () => {
-    const fk = await prisma.$queryRawUnsafe<Array<{ from: string; on_delete: string }>>(
-      "PRAGMA foreign_key_list(QuotaReservation)",
+  it("配额表已随配额功能一起移除", async () => {
+    const tables = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('UserQuota','QuotaReservation')",
     );
-    expect(fk.find((f) => f.from === "batchId")?.on_delete).toBe("CASCADE");
+    expect(tables).toHaveLength(0);
   });
 
-  it("删已完成批次：记录级联清空、文件落盘删除、已产出配额不退", async () => {
+  it("删已完成批次：记录级联清空、文件落盘删除", async () => {
     const batch = await prisma.generationBatch.findFirstOrThrow({
       where: { status: "completed", jobs: { some: { asset: { isNot: null } } } },
       include: { jobs: { include: { asset: true } } },
     });
     const assetIds = batch.jobs.filter((j) => j.asset).map((j) => j.asset!.id);
     const keys = batch.jobs.filter((j) => j.asset).map((j) => j.asset!.objectKey);
-    const quotaBefore = await prisma.userQuota.findUniqueOrThrow({
-      where: { userId: batch.userId },
-    });
 
     expect(keys.length).toBeGreaterThan(0);
     for (const k of keys) {
       expect(fs.existsSync(path.join(sandbox, "storage", k))).toBe(true);
     }
 
-    // 旧实现在这里抛 "Foreign key constraint violated"
     await queries.hardDeleteBatch(batch.id, batch.userId);
 
     expect(await prisma.generationBatch.findUnique({ where: { id: batch.id } })).toBeNull();
     expect(await prisma.generationJob.count({ where: { batchId: batch.id } })).toBe(0);
     expect(await prisma.asset.count({ where: { id: { in: assetIds } } })).toBe(0);
-    expect(await prisma.quotaReservation.count({ where: { batchId: batch.id } })).toBe(0);
 
     for (const k of keys) {
       expect(fs.existsSync(path.join(sandbox, "storage", k))).toBe(false);
     }
-
-    // 已成功的图消耗了真实 Provider 调用，删本地文件不该把额度退回来
-    const quotaAfter = await prisma.userQuota.findUniqueOrThrow({
-      where: { userId: batch.userId },
-    });
-    expect(quotaAfter.totalUsed).toBe(quotaBefore.totalUsed);
   });
 
-  it("删排队中批次：退还未产出的预占配额", async () => {
+  it("删排队中批次：Job 一并清空，不留孤儿", async () => {
     const src = await prisma.generationBatch.findFirstOrThrow();
-    const RESERVED = 3;
 
     const batch = await prisma.generationBatch.create({
       data: {
@@ -114,7 +101,7 @@ describe.runIf(hasFixture)("批次与资产删除", () => {
         status: "queued",
         inputSnapshotJson: src.inputSnapshotJson,
         templateSnapshotJson: src.templateSnapshotJson,
-        requestedCount: RESERVED,
+        requestedCount: 3,
         aspectRatio: "1:1",
       },
     });
@@ -127,19 +114,11 @@ describe.runIf(hasFixture)("批次与资产删除", () => {
         promptSnapshotJson: "{}",
       },
     });
-    await prisma.quotaReservation.create({
-      data: { userId: src.userId, batchId: batch.id, reservedCount: RESERVED, status: "PENDING" },
-    });
-    const quotaBefore = await prisma.userQuota.update({
-      where: { userId: src.userId },
-      data: { dailyUsed: { increment: RESERVED }, totalUsed: { increment: RESERVED } },
-    });
 
     await queries.hardDeleteBatch(batch.id, src.userId);
 
-    const quotaAfter = await prisma.userQuota.findUniqueOrThrow({ where: { userId: src.userId } });
-    expect(quotaBefore.dailyUsed - quotaAfter.dailyUsed).toBe(RESERVED);
-    expect(quotaBefore.totalUsed - quotaAfter.totalUsed).toBe(RESERVED);
+    expect(await prisma.generationBatch.findUnique({ where: { id: batch.id } })).toBeNull();
+    expect(await prisma.generationJob.count({ where: { batchId: batch.id } })).toBe(0);
   });
 
   it("删资产后批次计数与实际 Job 一致", async () => {

@@ -157,7 +157,6 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
   const [changingPassword, setChangingPassword] = React.useState(false);
 
   const [loading, setLoading] = React.useState(true);
-  const [quota, setQuota] = React.useState<{ dailyLimit: number; dailyUsed: number; totalQuota: number; totalUsed: number } | null>(null);
 
   // Provider 配置（生图，用户级）
   const [providerData, setProviderData] = React.useState<ProviderData | null>(null);
@@ -217,11 +216,6 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
 
    
   React.useEffect(() => {
-    fetch("/api/me").then(r => r.json()).then(json => {
-      if (json.data) {
-        setQuota(json.data.quota);
-      }
-    });
     fetch("/api/me/provider").then(r => r.json()).then(json => {
       if (json.data) {
         setProviderData(json.data);
@@ -743,34 +737,9 @@ export function SettingsClient({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <>
-      <PageHeader title="设置" description="账户安全、配额与 Provider 配置" />
+      <PageHeader title="设置" description="账户安全与 Provider 配置" />
 
       <div className="space-y-6">
-        {/* 配额概览 */}
-        {quota && (
-          <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
-            <h2 className="mb-3 text-sm font-medium text-[var(--color-text)]">配额概览</h2>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)]">今日剩余</p>
-                <p className="text-lg font-semibold text-[var(--color-text)]">{Math.max(0, quota.dailyLimit - quota.dailyUsed)} / {quota.dailyLimit}</p>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)]">今日已用</p>
-                <p className="text-lg font-semibold text-[var(--color-text)]">{quota.dailyUsed}</p>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)]">总量剩余</p>
-                <p className="text-lg font-semibold text-[var(--color-text)]">{Math.max(0, quota.totalQuota - quota.totalUsed)} / {quota.totalQuota}</p>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)]">总量已用</p>
-                <p className="text-lg font-semibold text-[var(--color-text)]">{quota.totalUsed}</p>
-              </div>
-            </div>
-          </section>
-        )}
-
         {/* 修改密码 */}
         <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
           <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">

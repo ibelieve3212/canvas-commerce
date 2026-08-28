@@ -54,7 +54,7 @@ async function main() {
   const adminUsername = "admin";
   const adminPass = "admin123";
   const adminHash = await argon2.hash(adminPass);
-  const admin = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { username: adminUsername },
     update: { role: "ADMIN", status: "ACTIVE", passwordHash: adminHash },
     create: {
@@ -65,26 +65,13 @@ async function main() {
       status: "ACTIVE",
     },
   });
-
-  // 管理员配额
-  await prisma.userQuota.upsert({
-    where: { userId: admin.id },
-    update: {},
-    create: {
-      userId: admin.id,
-      dailyLimit: 999,
-      totalQuota: 9999,
-      maxConcurrency: 10,
-      dailyDate: new Date().toISOString().slice(0, 10),
-    },
-  });
   console.log(`✓ 管理员: ${adminUsername} / ${adminPass}`);
 
   // ---- 演示用户 ----
   const demoUsername = "user";
   const userPass = "user123";
   const userHash = await argon2.hash(userPass);
-  const user = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { username: demoUsername },
     update: { status: "ACTIVE", passwordHash: userHash },
     create: {
@@ -93,18 +80,6 @@ async function main() {
       passwordHash: userHash,
       role: "USER",
       status: "ACTIVE",
-    },
-  });
-
-  await prisma.userQuota.upsert({
-    where: { userId: user.id },
-    update: {},
-    create: {
-      userId: user.id,
-      dailyLimit: 20,
-      totalQuota: 100,
-      maxConcurrency: 2,
-      dailyDate: new Date().toISOString().slice(0, 10),
     },
   });
   console.log(`✓ 演示用户: ${demoUsername} / ${userPass}`);

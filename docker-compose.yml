@@ -47,11 +47,6 @@ services:
       CCLOAD_NEW_API_TOKEN: ${CCLOAD_NEW_API_TOKEN:-}
       CCLOAD_IMAGE_MODEL: ${CCLOAD_IMAGE_MODEL:-gpt-image-2}
 
-      # ---- 配额默认值（新用户）----
-      QUOTA_DAILY_DEFAULT: ${QUOTA_DAILY_DEFAULT:-20}
-      QUOTA_TOTAL_DEFAULT: ${QUOTA_TOTAL_DEFAULT:-100}
-      QUOTA_MAX_CONCURRENCY_DEFAULT: ${QUOTA_MAX_CONCURRENCY_DEFAULT:-2}
-
       # ---- 自动清理兜底值 ----
       # 管理员在设置页改的值存数据库、优先级更高、改完即时生效。
       # 这里只在数据库无配置时使用（如全新部署）。

@@ -33,11 +33,11 @@ test.describe("阶段6 加固", () => {
     await page.waitForURL("**/apps");
 
     await page.goto("/settings");
-    await expect(page.getByText("配额概览")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("heading", { name: "修改密码" })).toBeVisible({ timeout: 10000 });
     await expect(page.getByRole("heading", { name: /存储与自动清理/ })).toBeHidden();
   });
 
-  test("设置页显示配额概览和修改密码表单", async ({ page }) => {
+  test("设置页显示修改密码表单与渠道配置", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("用户名").fill("admin");
     await page.getByLabel("密码").fill("admin123");
@@ -45,11 +45,10 @@ test.describe("阶段6 加固", () => {
     await page.waitForURL("**/apps");
 
     await page.goto("/settings");
-    await expect(page.getByText("配额概览")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("今日剩余")).toBeVisible();
-    await expect(page.getByText("总量剩余")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "修改密码" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "修改密码" })).toBeVisible({ timeout: 10000 });
     await expect(page.getByRole("heading", { name: "生图渠道", exact: true })).toBeVisible();
+    // 配额已移除，不该再有概览区块
+    await expect(page.getByText("配额概览")).toHaveCount(0);
   });
 
   test("设置页渠道配置：勾选跟随全局时收起输入区，取消后展开", async ({ page }) => {

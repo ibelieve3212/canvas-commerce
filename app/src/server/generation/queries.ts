@@ -73,7 +73,7 @@ export async function listBatches(
 
 // ── 彻底删除（归属校验 + 委托统一删除层）──
 
-/** 彻底删除批次（含所有 Job、Asset 微调子树、配额结算、文件）。 */
+/** 彻底删除批次（含所有 Job、Asset 微调子树、文件）。 */
 export async function hardDeleteBatch(batchId: string, userId: string) {
   const batch = await prisma.generationBatch.findUnique({
     where: { id: batchId },

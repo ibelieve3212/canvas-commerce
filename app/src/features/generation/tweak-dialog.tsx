@@ -97,7 +97,7 @@ export function TweakDialog({
           className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none"
         />
         <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-          用自然语言描述微调需求，模型会基于原图调整。每次微调扣 1 次配额。
+          用自然语言描述微调需求，模型会基于原图调整。
         </p>
       </div>
 

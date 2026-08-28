@@ -315,7 +315,7 @@ export function TasksBrowser() {
       <ConfirmDialog
         open={pendingCancel !== null}
         title="确认取消批次"
-        description="取消后未完成的任务将停止生成，未产出的额度会退回。已生成的图片保留。"
+        description="取消后未完成的任务将停止生成。已生成的图片保留。"
         confirmLabel="取消批次"
         cancelLabel="返回"
         loading={actionLoading === `cancel-${pendingCancel?.id}`}

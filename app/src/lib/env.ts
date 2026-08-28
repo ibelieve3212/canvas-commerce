@@ -24,10 +24,6 @@ export const env = createEnv({
     CCLOAD_IMAGE_ENDPOINT_MODE: z.enum(["images", "auto"]).default("images"),
     CCLOAD_CHANNELS: z.string().optional().default(""),
 
-    QUOTA_DAILY_DEFAULT: z.coerce.number().int().min(0).default(20),
-    QUOTA_TOTAL_DEFAULT: z.coerce.number().int().min(0).default(100),
-    QUOTA_MAX_CONCURRENCY_DEFAULT: z.coerce.number().int().min(1).default(2),
-
     // 自动清理策略的兜底默认值。
     // 管理员可在设置页覆盖前两项（存 SystemSetting），改完即时生效、无需重启。
     // 这里的值只在 DB 无配置时使用（如全新部署）。
@@ -52,9 +48,6 @@ export const env = createEnv({
     CCLOAD_IMAGE_MODEL: process.env.CCLOAD_IMAGE_MODEL,
     CCLOAD_IMAGE_ENDPOINT_MODE: process.env.CCLOAD_IMAGE_ENDPOINT_MODE,
     CCLOAD_CHANNELS: process.env.CCLOAD_CHANNELS,
-    QUOTA_DAILY_DEFAULT: process.env.QUOTA_DAILY_DEFAULT,
-    QUOTA_TOTAL_DEFAULT: process.env.QUOTA_TOTAL_DEFAULT,
-    QUOTA_MAX_CONCURRENCY_DEFAULT: process.env.QUOTA_MAX_CONCURRENCY_DEFAULT,
     ASSET_RETENTION_DAYS: process.env.ASSET_RETENTION_DAYS,
     MAX_ASSETS_PER_USER: process.env.MAX_ASSETS_PER_USER,
     CHAT_RETENTION_DAYS: process.env.CHAT_RETENTION_DAYS,
