@@ -33,7 +33,7 @@ function buildPrompts(
       : Array.from({ length: count }, (_, i) => ({
           outputIndex: i + 1,
           outputRole: app.kind === "POSTER" ? `point_${i + 1}` : `variant_${i + 1}`,
-          title: app.kind === "POSTER" ? "单卖点营销海报" : `${app.name}实拍`,
+          title: app.kind === "POSTER" ? `卖点海报 ${i + 1}` : `${app.name} ${i + 1}`,
           description: app.kind === "POSTER" ? "围绕分配到的单个卖点做画面主体" : "",
         }));
 
@@ -43,7 +43,11 @@ function buildPrompts(
       app.promptTemplate,
       {
         ...withCopy,
-        output_directive: buildOutputDirective(role, roles.length, opts),
+        output_directive: buildOutputDirective(role, roles.length, {
+          ...opts,
+          // 与 service.ts 保持一致：保真+防泄漏当前只对详情页开
+          strictProduct: app.kind === "DETAIL_PAGE",
+        }),
         point_directive: buildPointDirective(withCopy, role, roles.length),
       },
       [],
@@ -76,89 +80,12 @@ describe("多图脉络", () => {
 
   it("详情页非首屏的张次不再被要求做成首屏", () => {
     const prompts = buildPrompts(detailPageApp, detailValues, 6);
-    // 场景代入以真人使用的照片为主体，不是又一张带满文案的版式图
-    expect(prompts[2]).toContain("真人在真实环境中使用商品");
-    // 收尾转化落在品牌与购买理由上，不重复前面的卖点罗列
-    expect(prompts[5]).toContain("购买理由或服务承诺");
+    // 场景代入那张要明确说"不要罗列卖点"，这是防止退化成大杂烧的关键约束
+    expect(prompts[2]).toContain("不要罗列卖点");
+    // 收尾那张不该再堆卖点
+    expect(prompts[5]).toContain("不要再堆商品卖点");
     // 每张都要有"只做本张定位"的约束
     for (const p of prompts) expect(p).toContain("严格只做本张的定位");
-  });
-
-  it("防泄漏不等于压制文案：各模块仍要求写出该有的内容", () => {
-    // 第一版改写时用了"文字极简""文字极少"，结果首屏只剩商品名、
-    // 收尾只剩一个 logo——被压掉的是真实卖点文案，而泄漏的是模块名，
-    // 两件事互不相干。约束应正面说明该写什么。
-    const prompts = buildPrompts(detailPageApp, detailValues, 6);
-    expect(prompts[0]).toContain("主标题和一句副标题");
-    expect(prompts[1]).toContain("一行短标题和一句说明");
-    expect(prompts[3]).toContain("材质名称与工艺说明");
-    expect(prompts[4]).toContain("配必要的说明文字");
-    for (const p of prompts) {
-      expect(p).not.toContain("文字极简");
-      expect(p).not.toContain("文字极少");
-    }
-  });
-
-  describe("指令不能被当成文案画上去", () => {
-    // 用户实测：详情页第 2 张图上印出了"五大核心卖点"、
-    // 第 6 张印出了"品牌信任背书"——这些是我写给模型看的排版指令，
-    // 模型分不清是指令还是要画的字，直接抄到图上了。
-    // 实际电商详情页不会出现这种描述模块用途的词。
-    it("海报与买家秀的 title 不带序号，也带防泄漏声明", () => {
-      // 兜底生成的 title 原本是"卖点海报 1""香水 2"，会被拼进"用途是 XXX"。
-      // 带序号的更容易被模型当成要画的标题印上去，而且买家秀是随手拍风格，
-      // 图上冒出"买家秀 1"尤其违和。序号信息由"这是第 N 张"表达就够了。
-      for (const app of [posterApp, buyerShowApp]) {
-        const prompts = buildPrompts(app, { name: "香水", selling_points: "续航久\n防水" }, 2);
-        for (const p of prompts) {
-          expect(p).not.toMatch(/用途是.*[12]/);
-          expect(p).toContain("以上是排版要求，不是要写在图上的文字");
-          expect(p).toContain("也不要出现任何编号或序号");
-        }
-      }
-    });
-
-    it("role.description 不再注入 prompt（它是给人看的说明）", () => {
-      const prompts = buildPrompts(detailPageApp, detailValues, 6);
-      // detail-page.ts 里第 2 张的 description 是"3-5 个核心卖点"、
-      // 第 6 张是"品牌信任 + 购买理由"。这类措辞被模型当成文案抄上去，
-      // 图上就出现了"五大核心卖点""品牌信任背书"。
-      // 注意不能断言 prompt 完全不含"核心卖点"——NO_META_TEXT 的禁止清单
-      // 本身要列出这个词才能禁止它，那是有意为之。
-      expect(prompts[1]).not.toContain("3-5 个核心卖点");
-      expect(prompts[5]).not.toContain("品牌信任 + 购买理由");
-      // 而排版要求（描述版面结构、不含可抄的短语）仍在
-      expect(prompts[1]).toContain("版面分成若干并列的小块");
-    });
-
-    it("每张都显式声明排版要求不是要写的文字", () => {
-      const prompts = buildPrompts(detailPageApp, detailValues, 6);
-      for (const p of prompts) {
-        expect(p).toContain("以上是排版要求，不是要写在图上的文字");
-        // 把易泄漏的词直接列进禁止清单
-        expect(p).toContain("卖点总览");
-        expect(p).toContain("收尾转化");
-      }
-    });
-  });
-
-  describe("商品外观保真", () => {
-    // 用户实测：详情页"场景代入""功能证明"两张画出的商品不是上传的那件。
-    // 这两张要表现"人在使用"和"结构剖析"，模型得补画新角度，
-    // 一旦开始补画就顺手把商品也重绘了。
-    it("详情页每张都要求商品与商品图完全一致", () => {
-      const prompts = buildPrompts(detailPageApp, detailValues, 6);
-      for (const [i, p] of prompts.entries()) {
-        expect(p, `第 ${i + 1} 张缺少保真约束`).toContain("与商品图完全一致");
-        expect(p).toContain("只允许改变拍摄角度、光线和所处环境");
-        expect(p).toContain("不要重新设计商品");
-      }
-    });
-
-    it("买家秀也要求商品保真", () => {
-      const prompts = buildPrompts(buyerShowApp, { name: "香水" }, 2);
-      for (const p of prompts) expect(p).toContain("与商品图完全一致");
-    });
   });
 
   it("主图选 3 张拿到吸睛/场景/卖点三种不同定位", () => {
@@ -197,7 +124,7 @@ describe("多图脉络", () => {
   it("单张生成不出现'第 N 张/共 M 张'的成组措辞", () => {
     const [prompt] = buildPrompts(mainImageApp, { name: "音箱", category: "数码" }, 1);
     expect(prompt).not.toContain("共 1 张");
-    expect(prompt).toContain("本张用途");
+    expect(prompt).toContain("本张定位");
   });
 
   describe("同款参考版式（reference_layout）", () => {
@@ -293,7 +220,7 @@ describe("多图脉络", () => {
     it("单张买家秀不加成组一致性约束", () => {
       const [prompt] = buildPrompts(buyerShowApp, buyerValues, 1);
       expect(prompt).not.toContain("同一位人物");
-      expect(prompt).toContain("本张用途");
+      expect(prompt).toContain("本张定位");
     });
 
     it("传了参考人物图时，明确要求照着它还原而非当氛围参考", () => {
@@ -311,6 +238,57 @@ describe("多图脉络", () => {
         2,
       );
       expect(without).not.toContain("以该图为准");
+    });
+  });
+
+  describe("详情页：保真 + 防泄漏 + 场景图文案", () => {
+    // 这三项是在"用户认可的原版措辞"基础上追加的，不动原有描述的信息量——
+    // 曾试过改写措辞来防泄漏，结果连真实文案一起削掉了（首屏只剩商品名、
+    // 收尾只剩一个 logo），用户明确要求退回原版再单独加。
+    it("每张都要求商品与商品图完全一致", () => {
+      // 实测"场景代入""功能证明"画出的商品不是上传的那件——
+      // 这两张要补画新角度，一开始补画就顺手重绘了商品
+      const prompts = buildPrompts(detailPageApp, detailValues, 6);
+      for (const [i, p] of prompts.entries()) {
+        expect(p, `第 ${i + 1} 张缺少保真约束`).toContain("与商品图完全一致");
+        expect(p).toContain("不要重新设计商品");
+      }
+    });
+
+    it("每张都声明排版要求不是要写的文字", () => {
+      const prompts = buildPrompts(detailPageApp, detailValues, 6);
+      for (const p of prompts) {
+        expect(p).toContain("不是要写在图上的文字");
+        // 易泄漏的词列进黑名单：实测图上印出过"五大核心卖点""品牌信任背书"
+        expect(p).toContain("卖点总览");
+        expect(p).toContain("品牌信任背书");
+      }
+    });
+
+    it("原版措辞保持不变，不因防泄漏而削掉信息量", () => {
+      const prompts = buildPrompts(detailPageApp, detailValues, 6);
+      // 这些是用户认可那版的原话，改写它们会让出图文案变干瘪
+      expect(prompts[1]).toContain("以 3-5 条并列卖点为主体");
+      expect(prompts[5]).toContain("以品牌信任背书和购买理由收尾");
+    });
+
+    it("场景代入要配点题文案，不再是纯照片", () => {
+      // 原措辞"几乎不放文字"，实测出来零文案，而详情页每屏都该有信息承载
+      const prompts = buildPrompts(detailPageApp, detailValues, 6);
+      expect(prompts[2]).toContain("配一句点题的场景文案");
+      expect(prompts[2]).not.toContain("几乎不放文字");
+      // 但仍不该罗列卖点——那是第 2 张的活
+      expect(prompts[2]).toContain("不要罗列卖点");
+    });
+
+    it("其他应用暂不受影响（用户要求先只改详情页）", () => {
+      for (const app of [mainImageApp, posterApp, buyerShowApp]) {
+        const prompts = buildPrompts(app, { name: "音箱", category: "数码", selling_points: "续航久" }, 2);
+        for (const p of prompts) {
+          expect(p, `${app.slug} 不该带保真约束`).not.toContain("与商品图完全一致");
+          expect(p, `${app.slug} 不该带防泄漏声明`).not.toContain("不是要写在图上的文字");
+        }
+      }
     });
   });
 

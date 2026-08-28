@@ -149,7 +149,11 @@ export async function createBatch(
       // 于是详情页 6 张全做成首屏、主图 5 张全做成吸睛图。
       const perOutputValues = {
         ...valuesWithCopy,
-        output_directive: buildOutputDirective(role, roles.length, { hasPersonRef }),
+        output_directive: buildOutputDirective(role, roles.length, {
+          hasPersonRef,
+          // 商品保真 + 防泄漏先只在详情页开，验证无副作用后再推广
+          strictProduct: app.kind === "DETAIL_PAGE",
+        }),
         point_directive: buildPointDirective(valuesWithCopy, role, roles.length),
       };
       const prompt = composePrompt(
@@ -220,14 +224,11 @@ function computeOutputRoles(
   // role 名用 point_ 前缀让 buildPointDirective 认领；买家秀用 variant_ 前缀，
   // 由 buildOutputDirective 套用"人物一致、只变机位"的约束——
   // 它与海报的"内容要有区分"诉求相反，不能共用一套兜底。
-  //
-  // title 不带序号：它会被拼进 prompt 的"用途是 XXX"，带序号（如"卖点海报 1"）
-  // 更容易被模型当成要画的标题印在图上。序号信息已由"这是第 N 张"表达。
   const isPoster = app.kind === "POSTER";
   return Array.from({ length: count }, (_, i) => ({
     outputIndex: i + 1,
     outputRole: isPoster ? `point_${i + 1}` : `variant_${i + 1}`,
-    title: isPoster ? "单卖点营销海报" : `${app.name}实拍`,
+    title: isPoster ? `卖点海报 ${i + 1}` : `${app.name} ${i + 1}`,
     description: isPoster ? "围绕分配到的单个卖点做画面主体" : "",
   }));
 }

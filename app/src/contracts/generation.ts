@@ -247,44 +247,52 @@ export interface OutputRoleInfo {
 /**
  * 各 role 的额外约束。`title`/`description` 说的是"做什么"，
  * 这里补的是"别做什么"——后者才是防止每张都退化成大杂烧的关键。
- *
- * ⚠️ 措辞必须是"怎么排版"，不能出现可以被当成文案抄上去的短语。
- * 实测：`selling_points` 原本写"以 3-5 条并列卖点为主体"，图上就印出了
- * "五大核心卖点"；`closing` 写"以品牌信任背书和购买理由收尾"，
- * 图上就印出了"品牌信任背书"。模型分不清这是指令还是要画的字，
- * 所以这里只描述版面结构，具体文案一律交给 copy_directive。
- *
- * ⚠️ 但"防泄漏"不等于"少写字"。第一版改写时用了"文字极简""文字极少"，
- * 结果首屏只剩商品名、收尾只剩一个 logo——被压掉的是真实卖点文案，
- * 而泄漏的其实是模块名，两件事互不相干。所以这里要正面说明
- * 各模块该写什么内容，禁模块名的活交给 NO_META_TEXT。
  */
 const roleConstraints: Record<string, string> = {
   // 详情页 6 模块
-  hero: "画面以商品主体为核心，配一句有力的主标题和一句副标题，点明商品定位与最核心的利益点",
-  selling_points: "版面分成若干并列的小块，每块一个图标配一行短标题和一句说明，覆盖多个不同卖点",
-  scene: "画面是真人在真实环境中使用商品的照片，可配一句点题的场景文案",
-  material: "画面是商品材质与工艺的局部放大特写，配简短的材质名称与工艺说明",
-  function: "用结构示意、尺寸标注、参数或效果对比图来说明功能，配必要的说明文字",
-  closing: "画面呈现商品与品牌标识，配一句购买理由或服务承诺",
+  hero: "只呈现商品定位与一句核心利益点，文字极简，不要罗列多条卖点",
+  selling_points: "以 3-5 条并列卖点为主体，条目化排布，不要写成长段落",
+  // 场景图原本要求"几乎不放文字"，实测出来是一张纯照片、零文案，
+  // 而详情页的每一屏都该有信息承载。改为配点题文案，但仍不罗列卖点。
+  scene: "以真实使用场景和人物情境为主体，配一句点题的场景文案传达使用感受，不要罗列卖点",
+  material: "聚焦材质与工艺的局部放大特写，只标注与该细节相关的短说明",
+  function: "以参数、结构图示或效果对比来证明功能，不要重复前面的卖点文案",
+  closing: "以品牌信任背书和购买理由收尾，不要再堆商品卖点",
   // 主图 5 类型
-  selling_point: "画面突出一个卖点，配一句短文案",
-  compare: "画面用左右或前后对比的构图",
-  mood: "画面营造节日或季节氛围，商品融入其中",
+  selling_point: "只突出一个最强卖点，一句短文案，不要罗列多条",
+  compare: "以使用前后或与普通版的对比构图为主体",
+  mood: "以节日/促销/季节氛围营造为主，商品融入氛围",
 };
 
 /**
- * 防止指令被当成文案画上去的兜底。
+ * 防止排版指令被当成文案画上去。
  *
- * 上面每条约束都已改成"描述版面"而非"描述内容"，但 title、description
- * 这些字段（如"卖点总览""收尾转化"）仍可能被模型直接印在图上，
- * 所以再加一句显式禁止。
+ * 上面的措辞是给模型看的指令，但模型分不清"这是要求"还是"这是要画的字"：
+ * "以 3-5 条并列卖点为主体" → 图上印出"五大核心卖点"；
+ * "以品牌信任背书和购买理由收尾" → 图上印出"品牌信任背书"。
+ * title（"卖点总览""收尾转化"）同理。
+ *
+ * 曾试过改写这些措辞来规避泄漏，但一并削掉了描述的信息量，
+ * 出图文案反而变得干瘪（首屏只剩商品名、收尾只剩一个 logo）。
+ * 所以措辞维持原样，只在末尾加一句显式声明——两件事分开处理。
  */
 const NO_META_TEXT =
-  "以上是排版要求，不是要写在图上的文字。" +
-  "图中只能出现商品本身的真实文案，" +
-  "禁止出现“卖点总览”“核心卖点”“品牌信任背书”“收尾转化”“场景代入”" +
-  "“买家秀”“卖点海报”这类描述模块用途的词，也不要出现任何编号或序号";
+  "以上是排版与内容要求，不是要写在图上的文字。" +
+  "图中的文案要围绕商品本身来写，" +
+  "不要出现“卖点总览”“核心卖点”“品牌信任背书”“收尾转化”“场景代入”" +
+  "这类描述模块用途的词，也不要出现模块编号";
+
+/**
+ * 商品外观保真约束。
+ *
+ * 实测：详情页的"场景代入""功能证明"两张画出的商品不是用户上传的那件。
+ * 这两张要表现"人在使用"和"结构剖析"，模型得在原图之外补画新角度，
+ * 一旦开始补画就顺手把商品本身也重绘了。
+ */
+const PRODUCT_FIDELITY =
+  "画面中的商品必须与商品图完全一致：外形轮廓、比例、材质纹理、" +
+  "配色与图案细节都要严格还原，只允许改变拍摄角度、光线和所处环境，" +
+  "不要重新设计商品，不要替换成外观相似的其它产品";
 
 /**
  * 买家秀多张时的人物一致性约束。
@@ -310,29 +318,17 @@ const BUYER_SHOW_PERSON_REF =
   "严格还原其人物特征，不要自行发挥";
 
 /**
- * 商品外观保真约束。
- *
- * 实测：详情页的"场景代入""功能证明"两张画出的商品不是用户上传的那件。
- * 这两张要表现"人在使用"和"结构剖析"，模型得在原图之外补画新角度，
- * 一旦开始补画就顺手把商品本身也重绘了。
- * 越是需要新角度的模块越要强调保真，所以这条对所有非买家秀模块都加。
- */
-const PRODUCT_FIDELITY =
-  "画面中的商品必须与商品图完全一致：外形轮廓、比例、材质纹理、" +
-  "配色与图案细节都要严格还原，只允许改变拍摄角度、光线和所处环境，" +
-  "不要重新设计商品，不要替换成外观相似的其它产品";
-
-/**
  * 生成单张图的差异化指令。
  *
  * @param role      该张图的角色定义；无定义时返回空串
  * @param total     本批次总张数，用于告知模型"这是第 N 张、共 M 张"
  * @param opts      hasPersonRef: 是否上传了参考人物图（买家秀用）
+ *                  strictProduct: 追加商品保真与防泄漏约束（当前只详情页开）
  */
 export function buildOutputDirective(
   role: OutputRoleInfo | undefined,
   total: number,
-  opts?: { hasPersonRef?: boolean },
+  opts?: { hasPersonRef?: boolean; strictProduct?: boolean },
 ): string {
   if (!role) return "";
 
@@ -341,32 +337,25 @@ export function buildOutputDirective(
   const isBuyerShow = role.outputRole.startsWith("variant_");
 
   const parts: string[] = [];
-  // 让模型知道自己在整组里的位置与分工，是形成脉络（而非各画各的）的前提。
-  // title 必须保留——去掉它六张就没有分工了。但要显式说明这是"用途"
-  // 而非要画的标题，否则模型会把"卖点总览"这类词直接印在图上。
+  // 让模型知道自己在整组里的位置，是形成脉络（而非各画各的）的前提
   if (total > 1) {
     parts.push(
-      `本次共 ${total} 张成组输出，这是第 ${role.outputIndex} 张，用途是${role.title}`,
+      `本次共 ${total} 张成组输出，这是第 ${role.outputIndex} 张：${role.title}`,
     );
   } else {
-    parts.push(`本张用途：${role.title}`);
+    parts.push(`本张定位：${role.title}`);
   }
 
   if (isBuyerShow) {
     if (total > 1) parts.push(BUYER_SHOW_CONSISTENCY);
     if (opts?.hasPersonRef) parts.push(BUYER_SHOW_PERSON_REF);
-    parts.push(PRODUCT_FIDELITY);
-    // 买家秀是"随手拍"风格，图上冒出"买家秀 1"这种字尤其违和
-    parts.push(NO_META_TEXT);
     return parts.join("。") + "。";
   }
 
-  // role.description 同样是给人看的说明（如"3-5 个核心卖点"），
-  // 拼进 prompt 会被当成文案，所以不再注入——版面要求由 roleConstraints 表达
+  if (role.description) parts.push(role.description);
+
   const constraint = roleConstraints[role.outputRole];
   if (constraint) parts.push(constraint);
-
-  parts.push(PRODUCT_FIDELITY);
 
   if (total > 1) {
     parts.push(
@@ -375,7 +364,12 @@ export function buildOutputDirective(
     );
   }
 
-  parts.push(NO_META_TEXT);
+  // 保真与防泄漏目前只对详情页生效——用户要求先在详情页验证效果，
+  // 确认没有副作用再推广到主图/海报/买家秀。
+  if (opts?.strictProduct) {
+    parts.push(PRODUCT_FIDELITY);
+    parts.push(NO_META_TEXT);
+  }
 
   return parts.join("。") + "。";
 }

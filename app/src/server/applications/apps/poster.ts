@@ -32,6 +32,6 @@ export const posterApp: Application = {
   ],
   promptTemplate:
     "{{ref_images}}营销海报，商品 {{name}}，风格 {{style}}，背景 {{background}}，比例 {{aspect}}，构图随机 {{layout_random}}。目标人群 {{audience}}，补充 {{extra}}。{{copy_directive}}。{{output_directive}}{{point_directive}}保留排版安全区。",
-  templateVersion: 4,
+  templateVersion: 2,
   isPublished: true,
 };
