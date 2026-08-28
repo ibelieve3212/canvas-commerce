@@ -58,7 +58,15 @@ export default function AdminUsersPage() {
       <div className="mb-4 flex items-center gap-3">
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
+          {/* 三个属性都是为了躲开密码管理器的自动填充。实测过的故障：
+              点开某行的"重置密码"后，页面上出现了"一个文本框 + 一个密码框"，
+              Chrome 当成登录表单，把已存的 admin 灌进这个搜索框，
+              于是刚创建的用户被过滤掉，看起来像凭空消失（刷新又回来）。
+              name 里不能出现 user/login/email 之类的词，那正是它的判据。 */}
           <Input
+            type="search"
+            name="keyword"
+            autoComplete="off"
             placeholder="搜索用户名或姓名"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -95,9 +103,17 @@ export default function AdminUsersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--color-border)]">
-              {filtered.map((u) => (
-                <UserRowItem key={u.id} user={u} onChanged={() => void load()} />
-              ))}
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-3 py-8 text-center text-sm text-[var(--color-text-muted)]">
+                    没有匹配「{search}」的用户
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((u) => (
+                  <UserRowItem key={u.id} user={u} onChanged={() => void load()} />
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -247,6 +263,8 @@ function UserRowItem({ user, onChanged }: { user: UserRow; onChanged: () => void
             <div className="flex items-center gap-1">
               <Input
                 type="password"
+                name={`new-pass-${user.id}`}
+                autoComplete="new-password"
                 placeholder="新密码"
                 value={newPass}
                 onChange={(e) => setNewPass(e.target.value)}

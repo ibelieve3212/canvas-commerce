@@ -124,3 +124,55 @@ test.describe("ACCEPTANCE 用户管理与越权", () => {
     await userContext.close();
   });
 });
+
+/**
+ * 回归：新建用户后点"重置密码"，刚建的用户从列表里消失，刷新又回来。
+ *
+ * 根因不在后端。点开重置密码后页面上出现"一个文本框（搜索）+ 一个密码框"，
+ * Chrome 判定为登录表单，把保存过的 admin 自动填进搜索框，
+ * 于是新用户被前端过滤掉了。全程无请求、无报错，所以像凭空漂移。
+ */
+test.describe("用户管理列表的搜索框不被密码管理器劫持", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel("用户名").fill(ADMIN.username);
+    await page.getByLabel("密码").fill(ADMIN.password);
+    await page.getByRole("button", { name: "登录" }).click();
+    await page.waitForURL("**/apps");
+    await page.goto("/admin/users");
+  });
+
+  test("搜索框声明为 search 且关闭自动填充", async ({ page }) => {
+    const search = page.getByPlaceholder("搜索用户名或姓名");
+    await expect(search).toHaveAttribute("type", "search");
+    await expect(search).toHaveAttribute("autocomplete", "off");
+    // name 里不能出现 user/login/email，那是密码管理器的判据
+    const name = await search.getAttribute("name");
+    expect(name).not.toMatch(/user|login|email/i);
+  });
+
+  test("重置密码框声明 new-password，不让浏览器回填旧凭据", async ({ page }) => {
+    // 按用户名单元格精确匹配：hasText 是子串匹配，"user" 会同时命中 testuser 之类
+    const otherRow = page
+      .locator("tbody tr")
+      .filter({ has: page.getByRole("cell", { name: USER.username, exact: true }) });
+    await otherRow.getByRole("button", { name: "重置密码" }).click();
+    await expect(otherRow.getByPlaceholder("新密码")).toHaveAttribute(
+      "autocomplete",
+      "new-password",
+    );
+  });
+
+  test("搜索无结果时给出提示，而不是一张空表", async ({ page }) => {
+    await page.getByPlaceholder("搜索用户名或姓名").fill("zzz-不存在的用户-zzz");
+    await expect(page.getByText(/没有匹配.*的用户/)).toBeVisible();
+  });
+
+  test("管理员自己那一行指向设置页，不再是必定 409 的重置按钮", async ({ page }) => {
+    const selfRow = page
+      .locator("tbody tr")
+      .filter({ has: page.getByRole("cell", { name: ADMIN.username, exact: true }) });
+    await expect(selfRow.getByRole("link", { name: "改自己的密码请去设置页" })).toBeVisible();
+    await expect(selfRow.getByRole("button", { name: "重置密码" })).toHaveCount(0);
+  });
+});
