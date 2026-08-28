@@ -43,12 +43,7 @@ function buildPrompts(
       app.promptTemplate,
       {
         ...withCopy,
-        output_directive: buildOutputDirective(role, roles.length, {
-          ...opts,
-          // 与 service.ts 保持一致：详情页与主图开保真+防泄漏
-          strictProduct:
-            app.kind === "DETAIL_PAGE" || app.kind === "MAIN_IMAGE",
-        }),
+        output_directive: buildOutputDirective(role, roles.length, opts),
         point_directive: buildPointDirective(withCopy, role, roles.length),
       },
       [],
@@ -292,12 +287,12 @@ describe("多图脉络", () => {
       }
     });
 
-    it("海报与买家秀暂不受影响（未实测，先不动）", () => {
+    it("海报与买家秀同样带保真与防泄漏", () => {
       for (const app of [posterApp, buyerShowApp]) {
         const prompts = buildPrompts(app, { name: "音箱", selling_points: "续航久" }, 2);
         for (const p of prompts) {
-          expect(p, `${app.slug} 不该带保真约束`).not.toContain("与商品图完全一致");
-          expect(p, `${app.slug} 不该带防泄漏声明`).not.toContain("不是要写在图上的文字");
+          expect(p, `${app.slug} 缺少保真约束`).toContain("与商品图完全一致");
+          expect(p, `${app.slug} 缺少防泄漏声明`).toContain("不是要写在图上的文字");
         }
       }
     });

@@ -323,12 +323,11 @@ const BUYER_SHOW_PERSON_REF =
  * @param role      该张图的角色定义；无定义时返回空串
  * @param total     本批次总张数，用于告知模型"这是第 N 张、共 M 张"
  * @param opts      hasPersonRef: 是否上传了参考人物图（买家秀用）
- *                  strictProduct: 追加商品保真与防泄漏约束（当前只详情页开）
  */
 export function buildOutputDirective(
   role: OutputRoleInfo | undefined,
   total: number,
-  opts?: { hasPersonRef?: boolean; strictProduct?: boolean },
+  opts?: { hasPersonRef?: boolean },
 ): string {
   if (!role) return "";
 
@@ -349,6 +348,11 @@ export function buildOutputDirective(
   if (isBuyerShow) {
     if (total > 1) parts.push(BUYER_SHOW_CONSISTENCY);
     if (opts?.hasPersonRef) parts.push(BUYER_SHOW_PERSON_REF);
+    // 买家秀分支 return 得早，保真与防泄漏要在这里单独补一份。
+    // 它同样需要：商品得是用户上传的那件，而"买家秀 1"这类
+    // 兜底 title 印在随手拍风格的图上尤其违和。
+    parts.push(PRODUCT_FIDELITY);
+    parts.push(NO_META_TEXT);
     return parts.join("。") + "。";
   }
 
@@ -364,12 +368,8 @@ export function buildOutputDirective(
     );
   }
 
-  // 保真与防泄漏目前只对详情页生效——用户要求先在详情页验证效果，
-  // 确认没有副作用再推广到主图/海报/买家秀。
-  if (opts?.strictProduct) {
-    parts.push(PRODUCT_FIDELITY);
-    parts.push(NO_META_TEXT);
-  }
+  parts.push(PRODUCT_FIDELITY);
+  parts.push(NO_META_TEXT);
 
   return parts.join("。") + "。";
 }
