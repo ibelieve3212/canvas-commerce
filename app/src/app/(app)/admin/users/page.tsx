@@ -1,12 +1,14 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { PageHeader } from "@/components/shell/page-header";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useToast } from "@/components/ui/toast";
+import { useCurrentUser } from "@/app/(app)/user-context";
 import { USERNAME_HINT } from "@/contracts/user";
 import { Search, UserPlus, KeyRound, Ban, CheckCircle2, ShieldCheck } from "lucide-react";
 
@@ -178,9 +180,15 @@ function CreateUserPanel({ onClose, onCreated }: { onClose: () => void; onCreate
 
 function UserRowItem({ user, onChanged }: { user: UserRow; onChanged: () => void }) {
   const toast = useToast();
+  const currentUser = useCurrentUser();
   const [confirmAction, setConfirmAction] = React.useState<null | "reset_password" | "toggle_status">(null);
   const [newPass, setNewPass] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+
+  // 这一行就是当前登录的管理员自己。后端对自己只放行 update_quota，
+  // 重置密码和停用都会 409（停用自己等于把自己锁在门外）。
+  // 按钮照常渲染的话点了必然报错，所以直接指向设置页——改自己的密码在那儿。
+  const isSelf = currentUser?.id === user.id;
 
   async function patch(body: Record<string, unknown>, successMsg: string) {
     setBusy(true);
@@ -228,7 +236,14 @@ function UserRowItem({ user, onChanged }: { user: UserRow; onChanged: () => void
       </td>
       <td className="px-3 py-2.5">
         <div className="flex items-center justify-end gap-1">
-          {confirmAction === "reset_password" ? (
+          {isSelf ? (
+            <Link
+              href="/settings"
+              className="text-xs text-[var(--color-accent)] hover:underline"
+            >
+              改自己的密码请去设置页
+            </Link>
+          ) : confirmAction === "reset_password" ? (
             <div className="flex items-center gap-1">
               <Input
                 type="password"
