@@ -151,8 +151,11 @@ export async function createBatch(
         ...valuesWithCopy,
         output_directive: buildOutputDirective(role, roles.length, {
           hasPersonRef,
-          // 商品保真 + 防泄漏先只在详情页开，验证无副作用后再推广
-          strictProduct: app.kind === "DETAIL_PAGE",
+          // 商品保真 + 防泄漏。详情页先行验证通过（六张的编织纹理、配色、
+          // T 型轮廓都还原对了），主图实测同样需要——三张的坐垫外形各不相同、
+          // 场景图甚至把 T 型结构画成了扁圆形。
+          strictProduct:
+            app.kind === "DETAIL_PAGE" || app.kind === "MAIN_IMAGE",
         }),
         point_directive: buildPointDirective(valuesWithCopy, role, roles.length),
       };

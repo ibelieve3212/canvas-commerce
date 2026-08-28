@@ -45,8 +45,9 @@ function buildPrompts(
         ...withCopy,
         output_directive: buildOutputDirective(role, roles.length, {
           ...opts,
-          // 与 service.ts 保持一致：保真+防泄漏当前只对详情页开
-          strictProduct: app.kind === "DETAIL_PAGE",
+          // 与 service.ts 保持一致：详情页与主图开保真+防泄漏
+          strictProduct:
+            app.kind === "DETAIL_PAGE" || app.kind === "MAIN_IMAGE",
         }),
         point_directive: buildPointDirective(withCopy, role, roles.length),
       },
@@ -281,9 +282,19 @@ describe("多图脉络", () => {
       expect(prompts[2]).toContain("不要罗列卖点");
     });
 
-    it("其他应用暂不受影响（用户要求先只改详情页）", () => {
-      for (const app of [mainImageApp, posterApp, buyerShowApp]) {
-        const prompts = buildPrompts(app, { name: "音箱", category: "数码", selling_points: "续航久" }, 2);
+    it("主图同样开启保真：三张的商品外形不该各不相同", () => {
+      // 实测主图 3 张的坐垫外形完全不同：吸睛图是光滑羽毛纹、
+      // 场景图把 T 型结构画成了扁圆形、只有卖点图接近原图。
+      const prompts = buildPrompts(mainImageApp, { name: "坐垫", category: "养生" }, 3);
+      for (const [i, p] of prompts.entries()) {
+        expect(p, `主图第 ${i + 1} 张缺少保真约束`).toContain("与商品图完全一致");
+        expect(p).toContain("不要重新设计商品");
+      }
+    });
+
+    it("海报与买家秀暂不受影响（未实测，先不动）", () => {
+      for (const app of [posterApp, buyerShowApp]) {
+        const prompts = buildPrompts(app, { name: "音箱", selling_points: "续航久" }, 2);
         for (const p of prompts) {
           expect(p, `${app.slug} 不该带保真约束`).not.toContain("与商品图完全一致");
           expect(p, `${app.slug} 不该带防泄漏声明`).not.toContain("不是要写在图上的文字");
