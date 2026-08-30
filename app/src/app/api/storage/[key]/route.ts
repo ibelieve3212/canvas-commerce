@@ -1,10 +1,14 @@
 /**
- * 本地存储文件访问路由。验证登录后从本地文件系统读取并返回。
- * 带有 X-Content-Type-Options: nosniff 和 Content-Disposition。
+ * 本地存储文件访问路由。验证读权限后从本地文件系统读取并返回。
+ * 带有 X-Content-Type-Options: nosniff。
+ *
+ * 授权规则见 @/server/storage/authorize——三类 objectKey 的归属判断方式不同，
+ * 尤其聊天贴图路径里没有 userId，必须查会话表。
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/session";
 import { getStorage } from "@/server/storage/adapter";
+import { authorizeStorageRead } from "@/server/storage/authorize";
 
 export async function GET(
   _req: NextRequest,
@@ -16,14 +20,12 @@ export async function GET(
   const { key: encodedKey } = await params;
   const objectKey = decodeURIComponent(encodedKey);
 
-  // 验证 key 属于当前用户（兼容 OPT-3 新旧两种路径）
-  // 新路径：{userId}/{uuid}.ext
-  // 老路径：users/{userId}/{category}/{yyyy}/{mm}/{uuid}.ext
-  const userId = user.id;
-  const isNewPath = objectKey.startsWith(`${userId}/`);
-  const isOldPath = objectKey.startsWith(`users/${userId}/`);
-  if (!isNewPath && !isOldPath) {
-    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+  const auth = await authorizeStorageRead(objectKey, {
+    id: user.id,
+    role: user.role,
+  });
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.reason }, { status: 403 });
   }
 
   const storage = getStorage();
