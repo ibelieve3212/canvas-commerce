@@ -86,6 +86,7 @@ enum ApplicationKind {
   BUYER_SHOW
   POSTER
   CUSTOM
+  IMAGE_TOOL
 }
 
 enum ApplicationVisibility {

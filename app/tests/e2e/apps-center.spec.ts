@@ -56,9 +56,10 @@ test.describe("阶段2 应用中心", () => {
 
   test("从应用中心进入生成器", async ({ page }) => {
     await page.goto("/apps");
-    // 等四张卡都渲染完再点。收藏状态是客户端二次拉取的，列表会重渲染一次，
+    // 等七张卡都渲染完再点（4 个生成应用 + 3 个图片处理工具）。
+    // 收藏状态是客户端二次拉取的，列表会重渲染一次，
     // 点在旧 DOM 节点上会丢失导航（上一版这里偶发失败：URL 停在 /apps）。
-    await expect(page.getByRole("link", { name: /进入 / })).toHaveCount(4);
+    await expect(page.getByRole("link", { name: /进入 / })).toHaveCount(7);
     const link = page.getByRole("link", { name: /AI 详情页/ }).first();
     await expect(link).toBeVisible();
     await link.click();

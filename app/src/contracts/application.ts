@@ -15,6 +15,7 @@ export const ApplicationKindSchema = z.enum([
   "BUYER_SHOW",
   "POSTER",
   "CUSTOM",
+  "IMAGE_TOOL",
 ]);
 export type ApplicationKind = z.infer<typeof ApplicationKindSchema>;
 
@@ -40,6 +41,32 @@ export const aspectRatios = [
 ] as const;
 export const AspectRatioSchema = z.enum(aspectRatios);
 export type AspectRatio = z.infer<typeof AspectRatioSchema>;
+
+/** 运行时守卫：unknown → AspectRatio（服务端从快照/表单读出的值先过这道闸）。 */
+export function isAspectRatio(v: unknown): v is AspectRatio {
+  return typeof v === "string" && (aspectRatios as readonly string[]).includes(v);
+}
+
+/**
+ * 图片处理工具用：把源图宽高映射到最接近的支持比例。
+ * 用对数距离比较（比例是乘性量纲），2:1 与 1:2 各偏一侧时不会偏向竖图。
+ */
+export function nearestAspectRatio(width?: number | null, height?: number | null): AspectRatio {
+  const w = width && width > 0 ? width : 1;
+  const h = height && height > 0 ? height : 1;
+  const r = w / h;
+  let best: AspectRatio = "1:1";
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const ratio of aspectRatios) {
+    const [rw, rh] = ratio.split(":").map(Number);
+    const dist = Math.abs(Math.log(r) - Math.log(rw / rh));
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = ratio;
+    }
+  }
+  return best;
+}
 
 /* ---------- 认为 FormField 是单层、显式声明的可判别联合 ---------- */
 
@@ -172,7 +199,12 @@ export type FormField = z.infer<typeof FormFieldSchema>;
 export const FormSchemaSchema = z.array(FormFieldSchema);
 export type FormSchema = z.infer<typeof FormSchemaSchema>;
 
-/** 输出数量配置。详情页固定 6；主图 1/3/5；买家秀 1/2/4；海报 1/2/4/6。 */
+/**
+ * 输出数量配置。详情页固定 6；主图 1/3/5；买家秀 1/2/4；海报 1/2/4/6。
+ *
+ * per_image：图片处理工具（IMAGE_TOOL）专用——一次提交 N 张图 = N 个任务，
+ * 任务 i 只处理上传的第 i 张图。max 即单次上传张数上限（复用 ImageField 的 8 张约束）。
+ */
 export const OutputConfigSchema = z
   .discriminatedUnion("mode", [
     z.object({
@@ -182,6 +214,10 @@ export const OutputConfigSchema = z
     z.object({
       mode: z.literal("selectable"),
       options: z.array(z.number().int().min(1).max(6)),
+    }),
+    z.object({
+      mode: z.literal("per_image"),
+      max: z.number().int().min(1).max(8),
     }),
   ])
   .nullable();

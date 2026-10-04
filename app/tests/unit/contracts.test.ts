@@ -17,8 +17,8 @@ describe("FormField key regex", () => {
 });
 
 describe("builtin applications contract", () => {
-  it("四个内置应用通过 ApplicationSchema 校验", () => {
-    expect(builtinApplications).toHaveLength(4);
+  it("七个内置应用通过 ApplicationSchema 校验", () => {
+    expect(builtinApplications).toHaveLength(7);
     for (const app of builtinApplications) {
       const result = ApplicationSchema.safeParse(app);
       expect(result.success, `${app.slug}: ${JSON.stringify(result.error?.issues)}`).toBe(true);

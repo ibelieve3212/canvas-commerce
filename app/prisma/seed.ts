@@ -48,7 +48,7 @@ async function main() {
       },
     });
   }
-  console.log("✓ 4 内置应用已 seed");
+  console.log(`✓ ${builtinApplications.length} 内置应用已 seed`);
 
   // ---- 开发管理员 ----
   const adminUsername = "admin";

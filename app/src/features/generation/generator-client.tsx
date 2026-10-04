@@ -43,6 +43,8 @@ function defaultValuesFor(app: Application): FormValues {
 
 function computeOutputCount(app: Application): number {
   if (app.outputConfig?.mode === "fixed") return app.outputConfig.count;
+  // per_image 工具：计数由上传图数实时决定，这里的初始值只作占位
+  if (app.outputConfig?.mode === "per_image") return 1;
   const opts = app.outputConfig?.options ?? [1];
   return opts[0];
 }
@@ -124,6 +126,25 @@ export function GeneratorClient({ app }: { app: Application }) {
   const [restoreNotice, setRestoreNotice] = React.useState<string | null>(null);
   const [confirmingNoCopy, setConfirmingNoCopy] = React.useState(false);
   const succeededCount = jobs.filter((j) => j.status === "succeeded").length;
+
+  // per_image 工具（白底图/一键精修/AI 变清晰）：一张图一个任务，
+  // 计数跟随已上传图数实时派生，不进 state、不占“生成数量”选择器。
+  // 服务端会以图数为准（单一事实源），这里只保证提交体/按钮/进度条一致。
+  const isPerImage = app.outputConfig?.mode === "per_image";
+  const perImageCount = React.useMemo(() => {
+    if (!isPerImage) return 0;
+    let n = 0;
+    for (const f of app.formSchema) {
+      if (f.type === "image") {
+        const val = values[f.key];
+        if (Array.isArray(val)) {
+          n += (val as Array<Record<string, string>>).filter((it) => it.uploadId).length;
+        }
+      }
+    }
+    return n;
+  }, [isPerImage, app.formSchema, values]);
+  const effectiveRequestedCount = isPerImage ? Math.max(1, perImageCount) : requestedCount;
 
   // 该应用的模板是否真的会用到文案指令。买家秀没有 {{copy_directive}}，
   // 它的输出与文案字段无关，不该为它弹这个确认。
@@ -308,7 +329,7 @@ export function GeneratorClient({ app }: { app: Application }) {
           formValues: values,
           referenceImages,
           aspectRatio: app.defaultAspectRatio,
-          requestedCount,
+          requestedCount: effectiveRequestedCount,
           idempotencyKey,
         }),
       });
@@ -402,7 +423,11 @@ export function GeneratorClient({ app }: { app: Application }) {
               className="w-full"
               size="lg"
             >
-              生成 {requestedCount} 张{app.name}
+              {isPerImage
+                ? perImageCount > 0
+                  ? `开始处理（${perImageCount} 张）`
+                  : "上传图片后开始"
+                : `生成 ${requestedCount} 张${app.name}`}
             </Button>
             {firstErrorKey && errors[firstErrorKey] && (
               <p className="mt-2 text-xs text-[var(--color-danger)]" role="alert">
@@ -425,7 +450,7 @@ export function GeneratorClient({ app }: { app: Application }) {
         <ResultPanel
           app={app}
           jobs={jobs}
-          requestedCount={requestedCount}
+          requestedCount={effectiveRequestedCount}
           succeededCount={succeededCount}
           submitting={submitting}
           onSubmit={handleSubmit}

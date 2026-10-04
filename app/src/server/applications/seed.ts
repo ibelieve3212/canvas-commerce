@@ -8,12 +8,18 @@ import { mainImageApp } from "./apps/main-image";
 import { detailPageApp } from "./apps/detail-page";
 import { buyerShowApp } from "./apps/buyer-show";
 import { posterApp } from "./apps/poster";
+import { whiteBackgroundApp } from "./apps/white-background";
+import { imageRetouchApp } from "./apps/image-retouch";
+import { imageClarityApp } from "./apps/image-clarity";
 
 export const builtinApplications: Application[] = [
   mainImageApp,
   detailPageApp,
   buyerShowApp,
   posterApp,
+  whiteBackgroundApp,
+  imageRetouchApp,
+  imageClarityApp,
 ];
 
 export function getApplicationBySlug(slug: string): Application | undefined {

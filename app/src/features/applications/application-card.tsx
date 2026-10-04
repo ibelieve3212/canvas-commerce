@@ -38,6 +38,7 @@ export function ApplicationCard({
               {app.kind === "BUYER_SHOW" && "1/2/4 张"}
               {app.kind === "POSTER" && "1/2/4/6 张"}
               {app.kind === "CUSTOM" && "自定义"}
+              {app.kind === "IMAGE_TOOL" && "一图一任务 · 最多 8 张"}
             </span>
           </div>
         </div>

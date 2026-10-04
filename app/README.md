@@ -43,7 +43,7 @@ pnpm prisma:seed
 
 Seed 会创建：
 - admin / admin123（管理员）
-- 4 个内置应用 + 默认配额
+- 7 个内置应用 + 默认配额
 
 ### 启动开发服务器
 
@@ -145,6 +145,9 @@ tests/                    # 测试
 | AI 详情页 | `/apps/detail-page` | 6 张详情页模块 |
 | 买家秀 | `/apps/buyer-show` | 1/2/4 张 |
 | 营销海报 | `/apps/poster` | 1/2/4/6 张 |
+| 白底图 | `/apps/white-background` | 抠底换纯白底，一张一任务，最多 8 张，可选 1:1/4:5/3:4 |
+| 一键精修 | `/apps/image-retouch` | 光影/色彩/干净度增强，逐张跟随原图比例 |
+| AI 变清晰 | `/apps/image-clarity` | 模糊图 AI 重绘清晰版，文字 LOGO 不变 |
 
 生成结果可点"微调"用自然语言调整（调 `/v1/images/edits`，最多 3 轮，每轮扣 1 配额）。
 

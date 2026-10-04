@@ -17,7 +17,8 @@ import {
 } from "@/server/provider/throttle";
 import { env } from "@/lib/env";
 import { composePrompt, validateFormValues, applyCopyPriority, buildOutputDirective, buildPointDirective } from "@/contracts/generation";
-import type { Application } from "@/contracts/application";
+import { isAspectRatio, nearestAspectRatio } from "@/contracts/application";
+import type { Application, FormField } from "@/contracts/application";
 import type { FormValues } from "@/contracts/generation";
 import { getApplicationById } from "@/server/applications/seed";
 
@@ -58,7 +59,43 @@ export async function createBatch(
     throw new Error("VALIDATION_FAILED:" + JSON.stringify(validation.errors));
   }
 
-  const roles = computeOutputRoles(app, input.requestedCount);
+  // ---- per_image 工具（白底图/一键精修/AI 变清晰）----
+  // 任务数由上传图数决定：一张图一个任务，客户端传的 requestedCount 不参与。
+  // 每个任务还要定自己的比例：白底图读用户选的比例字段；
+  // 精修/变清晰没有比例字段，跟随原图宽高映射到最近的支持比例（各张独立）。
+  const perImageConfig = app.outputConfig?.mode === "per_image" ? app.outputConfig : null;
+  let requestedCount = input.requestedCount;
+  let perJobAspectRatios: string[] | null = null;
+  if (perImageConfig) {
+    requestedCount = input.referenceImages.length;
+    if (requestedCount < 1) {
+      throw new Error("VALIDATION_FAILED:" + JSON.stringify({ source: "至少上传 1 张图片" }));
+    }
+    if (requestedCount > perImageConfig.max) {
+      throw new Error("VALIDATION_FAILED:" + JSON.stringify({ source: `单次最多处理 ${perImageConfig.max} 张图片` }));
+    }
+    const aspectField = app.formSchema.find(
+      (f): f is Extract<FormField, { type: "radio" | "select" }> => f.type === "radio" || f.type === "select",
+    );
+    const chosen = aspectField ? input.formValues[aspectField.key] : undefined;
+    const fixed = isAspectRatio(chosen) ? chosen : null;
+    if (fixed) {
+      perJobAspectRatios = input.referenceImages.map(() => fixed);
+    } else {
+      const uploads = await prisma.upload.findMany({
+        where: { id: { in: input.referenceImages.map(r => r.uploadId) }, userId: input.userId },
+        select: { id: true, width: true, height: true },
+      });
+      perJobAspectRatios = input.referenceImages.map((r) => {
+        const u = uploads.find((x) => x.id === r.uploadId);
+        return nearestAspectRatio(u?.width, u?.height);
+      });
+    }
+  }
+  const batchAspectRatio = (perJobAspectRatios?.[0] ?? input.aspectRatio) as CreateBatchInput["aspectRatio"];
+
+  // ---- 通用：任务角色 + prompt 逐张指令 ----
+  const roles = computeOutputRoles(app, requestedCount);
   // OPT-1: 文案优先级包装 — 注入 copy_directive 后再走 composePrompt
   const valuesWithCopy = applyCopyPriority(input.formValues);
   // 传了参考人物图时，要明确要求照着它长，否则模型只把它当氛围参考
@@ -71,8 +108,8 @@ export async function createBatch(
       uploadId: r.uploadId,
       role: r.role,
     })),
-    aspectRatio: input.aspectRatio,
-    requestedCount: input.requestedCount,
+    aspectRatio: batchAspectRatio,
+    requestedCount: requestedCount,
     promptTemplate: app.promptTemplate,
     templateVersion: app.templateVersion,
     createdAt: new Date().toISOString(),
@@ -92,13 +129,15 @@ export async function createBatch(
         status: "queued",
         inputSnapshotJson: JSON.stringify(inputSnapshot),
         templateSnapshotJson: JSON.stringify(templateSnapshot),
-        requestedCount: input.requestedCount,
-        aspectRatio: input.aspectRatio,
+        requestedCount: requestedCount,
+        aspectRatio: batchAspectRatio,
         idempotencyKey: input.idempotencyKey,
       },
     });
 
     for (const role of roles) {
+      // 任务序号（0 起）：per_image 工具用它把任务 i 绑到上传的第 i 张图
+      const jobIndex = role.outputIndex - 1;
       // prompt 必须逐张算：composePrompt 要吃 output_directive（本张定位）
       // 和 point_directive（海报轮转到的那条卖点）。此前它在循环外只算一次，
       // N 个 Job 拿到逐字相同的字符串，outputRole 从未进过 prompt——
@@ -116,6 +155,13 @@ export async function createBatch(
         input.referenceImages,
       );
 
+      // per_image 工具：快照里记上本任务专属的源图与比例，
+      // processJob 据此只加载这一张图、用这个比例出图，按张重试也只重试这张
+      const sourceUploadId = perImageConfig
+        ? input.referenceImages[jobIndex]?.uploadId
+        : undefined;
+      const jobAspectRatio = perJobAspectRatios?.[jobIndex];
+
       await tx.generationJob.create({
         data: {
           batchId: b.id,
@@ -129,6 +175,8 @@ export async function createBatch(
             outputRole: role.outputRole,
             outputIndex: role.outputIndex,
             templateVersion: app.templateVersion,
+            ...(sourceUploadId ? { sourceUploadId } : {}),
+            ...(jobAspectRatio ? { aspectRatio: jobAspectRatio } : {}),
           }),
         },
       });
@@ -156,6 +204,17 @@ function computeOutputRoles(
 ): Array<{ outputIndex: number; outputRole: string; title: string; description: string }> {
   if (app.outputRoles.length > 0) {
     return app.outputRoles.slice(0, count).map((r) => ({ ...r, description: r.description ?? "" }));
+  }
+  // 图片处理工具：任务与上传图一一对应，角色名用 image_ 前缀。
+  // 不能落入 variant_ 兕底——那会触发 buildOutputDirective 的"人物一致、只变机位"
+  // 语义，与"每张独立处理"的诉求相反。
+  if (app.kind === "IMAGE_TOOL") {
+    return Array.from({ length: count }, (_, i) => ({
+      outputIndex: i + 1,
+      outputRole: `image_${i + 1}`,
+      title: `第 ${i + 1} 张`,
+      description: "",
+    }));
   }
   // 未声明 outputRoles 的应用（海报、买家秀）：海报按卖点轮转，
   // role 名用 point_ 前缀让 buildPointDirective 认领；买家秀用 variant_ 前缀，
@@ -276,37 +335,48 @@ export async function processJob(jobId: string): Promise<void> {
     prompt: string;
     outputRole: string;
     outputIndex: number;
+    /** per_image 工具任务绑定的源图（服务端写入）：有它就只加载这一张图 */
+    sourceUploadId?: string;
+    /** per_image 工具任务的比例（跟随原图/用户选择）：缺省回落批次比例 */
+    aspectRatio?: string;
   };
 
-  // 从 inputSnapshot 读 referenceImages，查 Upload 表拿图片数据
+  // 从 inputSnapshot 读 referenceImages，查 Upload 表拿图片数据。
+  // per_image 工具：任务快照里记了 sourceUploadId，只取绑定的那一张；
+  // 其余应用维持批次级语义（N 输出共享全部素材）。
   const inputSnapshot = JSON.parse(job.batch.inputSnapshotJson) as {
     referenceImages?: { uploadId: string; role: "product" | "style" | "person" | "brand" }[];
   };
-  const refImages = inputSnapshot.referenceImages ?? [];
+  const refImages = promptData.sourceUploadId
+    ? (inputSnapshot.referenceImages ?? []).filter((r) => r.uploadId === promptData.sourceUploadId)
+    : (inputSnapshot.referenceImages ?? []);
 
-  // 批量查 Upload 记录并加载图片二进制
-  const providerRefImages: ProviderReferenceImage[] = [];
-  if (refImages.length > 0) {
-    const uploads = await prisma.upload.findMany({
-      where: { id: { in: refImages.map(r => r.uploadId) }, userId: job.batch.userId },
-      select: { id: true, objectKey: true, mimeType: true },
-    });
-    const storage = getStorage();
-    for (const ref of refImages) {
-      const upload = uploads.find(u => u.id === ref.uploadId);
-      if (!upload) continue;
-      const buffer = await storage.get(upload.objectKey);
-      providerRefImages.push({
-        buffer,
-        mimeType: upload.mimeType,
-        role: ref.role,
-        uploadId: ref.uploadId,
-      });
-    }
-  }
-
+  // 批量查 Upload 记录并加载图片二进制。
+  // 放进下面的 try：文件缺失（storage.get ENOENT）曾是裸抛，
+  // 任务会永久卡在 running——现在统一走 failed 语义，
+  // per_image 工具还能保证一张坏图只拖垮它自己的任务。
   const provider = await getProviderForUser(job.batch.userId);
   try {
+    const providerRefImages: ProviderReferenceImage[] = [];
+    if (refImages.length > 0) {
+      const uploads = await prisma.upload.findMany({
+        where: { id: { in: refImages.map(r => r.uploadId) }, userId: job.batch.userId },
+        select: { id: true, objectKey: true, mimeType: true },
+      });
+      const storage = getStorage();
+      for (const ref of refImages) {
+        const upload = uploads.find(u => u.id === ref.uploadId);
+        if (!upload) continue;
+        const buffer = await storage.get(upload.objectKey);
+        providerRefImages.push({
+          buffer,
+          mimeType: upload.mimeType,
+          role: ref.role,
+          uploadId: ref.uploadId,
+        });
+      }
+    }
+
     // 打印实际解析出的 provider：worker 启动日志里的 GENERATION_PROVIDER
     // 是个不参与决策的 env，曾误导排查。真正用哪个渠道只有这里知道，
     // 而且它还决定要不要走并发闸门（mock 直接放行、不占名额）。
@@ -314,9 +384,15 @@ export async function processJob(jobId: string): Promise<void> {
     // 并发闸门：名额满时排队，完成一个才放下一个
     await throttleProviderRequest(provider.name);
 
+    // 比例：per_image 工具任务有自己的比例（各张可能不同）；
+    // 其余应用快照无此字段，回落到批次比例——行为不变
+    const jobAspectRatio = isAspectRatio(promptData.aspectRatio)
+      ? promptData.aspectRatio
+      : (job.batch.aspectRatio as "1:1" | "4:5" | "3:4" | "16:9" | "9:16");
+
     const result = await generateWithRateLimitRetry(provider, {
       prompt: promptData.prompt,
-      aspectRatio: job.batch.aspectRatio as "1:1" | "4:5" | "3:4" | "16:9" | "9:16",
+      aspectRatio: jobAspectRatio,
       outputFormat: "png",
       referenceImages: providerRefImages,
       metadata: { batchId: job.batchId, jobId: job.id, outputRole: job.outputRole },
