@@ -16,8 +16,8 @@ export const mainImageApp: Application = {
     { outputIndex: 1, outputRole: "hero", title: "吸睛主图", description: "高点击率首图，视觉冲击+利益引导" },
     { outputIndex: 2, outputRole: "scene", title: "场景主图", description: "商品在真实使用场景中，增强代入感" },
     { outputIndex: 3, outputRole: "selling_point", title: "卖点主图", description: "突出一个核心卖点" },
-    { outputIndex: 4, outputRole: "compare", title: "对比主图", description: "使用前后或与普通版对比（5 张启用）" },
-    { outputIndex: 5, outputRole: "mood", title: "氛围主图", description: "节日/促销/季节氛围（5 张启用）" },
+    { outputIndex: 4, outputRole: "compare", title: "对比主图", description: "使用前后或与普通版对比" },
+    { outputIndex: 5, outputRole: "mood", title: "氛围主图", description: "节日/促销/季节氛围" },
   ],
   defaultAspectRatio: "1:1",
   formSchema: [
@@ -25,7 +25,7 @@ export const mainImageApp: Application = {
     { type: "image", key: "product", label: "商品图 / 产品素材", required: true, min: 1, max: 6, roles: ["product"], allowLibrary: true, group: "素材" },
     { type: "text", key: "name", label: "商品名", required: true, placeholder: "例：便携蓝牙音箱", maxLength: 80, defaultValue: "", group: "商品信息" },
     { type: "text", key: "category", label: "类目", required: true, placeholder: "例：数码 / 音箱", maxLength: 60, defaultValue: "", group: "商品信息" },
-    { type: "textarea", key: "info", label: "商品信息", required: false, placeholder: "填写商品信息、卖点、参数", maxLength: 1000, defaultValue: "", group: "商品信息" },
+    { type: "textarea", key: "info", label: "商品信息", required: false, placeholder: "填写商品信息、卖点、参数；写明与普通款的差异，对比主图会用到", maxLength: 1000, defaultValue: "", group: "商品信息" },
     { type: "select", key: "platform", label: "平台", required: false, defaultValue: "taobao", group: "生成设置", options: [
       { label: "淘宝", value: "taobao" }, { label: "拼多多", value: "pinduoduo" }, { label: "抖音", value: "douyin" }, { label: "通用", value: "general" } ] },
     { type: "select", key: "market", label: "市场", required: false, defaultValue: "domestic", group: "生成设置", options: [
