@@ -42,10 +42,22 @@ test.describe("阶段2 应用中心", () => {
 
   test("收藏刷新后保持", async ({ page }) => {
     await page.goto("/apps");
-    // 点击第一张卡（商品主图）的收藏按钮（精确匹配，避免误点“仅看收藏”）
-    await page.getByRole("button", { name: "收藏", exact: true }).first().click();
+    // 点击第一张卡（商品主图）的收藏按钮（精确匹配，避免误点“仅看收藏”）。
+    // 水合完成前的点击会被 React 吞掉且不回放，重试到按钮翻转为“取消收藏”即写入成功。
+    const favBtn = page.getByRole("button", { name: "收藏", exact: true }).first();
+    await expect(async () => {
+      await favBtn.click();
+      await expect(
+        page.getByRole("button", { name: "取消收藏", exact: true }).first(),
+      ).toBeVisible({ timeout: 1000 });
+    }).toPass();
     // 刷新
     await page.reload();
+    // 等水合完成再点“仅看收藏”：收藏态要在客户端从 localStorage 恢复后才会显示
+    // （按钮变回“取消收藏”就是信号），否则点击落在水合前，事件未绑定、URL 不变。
+    await expect(
+      page.getByRole("button", { name: "取消收藏", exact: true }).first(),
+    ).toBeVisible();
     // 仅看收藏
     await page.getByRole("button", { name: "仅看收藏" }).click();
     await expect(page).toHaveURL(/favorites=1/);
