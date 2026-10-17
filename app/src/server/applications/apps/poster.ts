@@ -23,7 +23,13 @@ export const posterApp: Application = {
       { label: "高端质感", value: "premium" }, { label: "极简", value: "minimal" }, { label: "活力促销", value: "promo" }, { label: "国潮", value: "national" } ] },
     { type: "select", key: "background", label: "背景", required: false, defaultValue: "solid", group: "生成设置", options: [
       { label: "纯色", value: "solid" }, { label: "渐变", value: "gradient" }, { label: "场景", value: "scene" }, { label: "抽象", value: "abstract" } ] },
-    { type: "slider", key: "layout_random", label: "构图随机程度", required: false, min: 0, max: 100, step: 1, unit: "", defaultValue: 30, group: "生成设置" },
+    { type: "slider", key: "layout_random", label: "构图随机程度", required: false, min: 0, max: 100, step: 25, unit: "", defaultValue: 25, hintLow: "标准稳妥", hintHigh: "大胆随机", group: "生成设置", levels: [
+      { value: 0, phrase: "采用标准电商海报构图，商品主体突出、标题区规整稳妥" },
+      { value: 25, phrase: "构图以稳妥为主，元素位置可轻微变化" },
+      { value: 50, phrase: "构图适度灵活，商品与文案位置不必拘泥常规" },
+      { value: 75, phrase: "构图明显放开，追求视觉张力与排版变化" },
+      { value: 100, phrase: "构图大胆随机，每张海报的视觉编排都明显不同" },
+    ] },
     { type: "radio", key: "aspect", label: "比例", required: false, defaultValue: "3:4", group: "生成设置", options: [
       { label: "1:1", value: "1:1" }, { label: "3:4", value: "3:4" }, { label: "9:16", value: "9:16" } ] },
     { type: "text", key: "audience", label: "目标人群", required: false, placeholder: "例：年轻白领", maxLength: 100, defaultValue: "", group: "高级要求" },
@@ -31,7 +37,7 @@ export const posterApp: Application = {
     { type: "textarea", key: "copy", label: "图片文案", required: false, placeholder: "例：限时特惠，留空则由 AI 自动生成", maxLength: 500, defaultValue: "", group: "高级要求" },
   ],
   promptTemplate:
-    "{{ref_images}}营销海报，商品 {{name}}，风格 {{style}}，背景 {{background}}，比例 {{aspect}}，构图随机 {{layout_random}}。目标人群 {{audience}}，补充 {{extra}}。{{copy_directive}}。{{output_directive}}{{point_directive}}保留排版安全区。",
-  templateVersion: 3,
+    "{{ref_images}}营销海报，商品 {{name}}，风格 {{style}}，背景 {{background}}，比例 {{aspect}}。构图：{{layout_random}}。目标人群 {{audience}}，补充 {{extra}}。{{copy_directive}}。{{output_directive}}{{point_directive}}保留排版安全区。",
+  templateVersion: 4,
   isPublished: true,
 };

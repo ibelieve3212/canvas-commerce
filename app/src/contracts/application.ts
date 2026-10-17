@@ -155,6 +155,24 @@ export const SliderFieldSchema = z.object({
   step: z.number().int().min(1).default(1),
   unit: z.string().optional().default(""),
   defaultValue: z.number().int().default(0),
+  /** 滑条两端的语义提示（渲染在轨道下方，如"保留原样 / 彻底清理"）。 */
+  hintLow: z.string().optional(),
+  hintHigh: z.string().optional(),
+  /**
+   * 档位语义：把数值映射成给生图模型的指令短语。
+   * 声明了 levels 的滑条，prompt 注入最近档位的 phrase 而非裸数字——
+   * "反光清理 75"对模型是猜谜，"把反光面的杂乱倒影全部替换为干净反光"
+   * 才是可执行指令（与买家秀人物一致性同一教训：含糊约束模型保不住）。
+   * 未声明的滑条（买家秀真实度、海报构图随机）维持裸数字注入，存量行为不变。
+   */
+  levels: z
+    .array(
+      z.object({
+        value: z.number().int(),
+        phrase: z.string().min(1),
+      }),
+    )
+    .optional(),
   group: z.string().optional(),
   /** 条件显示：当另一字段等于某值时才显示此字段。 */
   showWhen: z

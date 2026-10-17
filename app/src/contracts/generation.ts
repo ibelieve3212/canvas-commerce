@@ -464,3 +464,41 @@ export function applyCopyPriority(values: FormValues): FormValues {
 
   return { ...values, copy_directive: directive };
 }
+
+/**
+ * 滑条档位映射：声明了 levels 的滑条，把数值换成最近档位的指令短语。
+ * 只影响 prompt（composePrompt 吃的是返回值）；inputSnapshot 仍存原始数值。
+ * 未声明 levels 的滑条与其它字段原样透传，存量应用行为不变。
+ */
+export function applySliderLevels(
+  formSchema: import("./application").FormSchema,
+  values: FormValues,
+): FormValues {
+  const out: FormValues = { ...values };
+  for (const field of formSchema) {
+    if (field.type !== "slider" || !field.levels) continue;
+    const first = field.levels[0];
+    if (!first) continue;
+
+    const raw = out[field.key];
+    const n =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string" && raw.trim() !== "" && !Number.isNaN(Number(raw))
+          ? Number(raw)
+          : field.defaultValue;
+    const clamped = Math.min(field.max, Math.max(field.min, n));
+
+    let best = first;
+    let bestDist = Math.abs(clamped - best.value);
+    for (const level of field.levels) {
+      const dist = Math.abs(clamped - level.value);
+      if (dist < bestDist) {
+        best = level;
+        bestDist = dist;
+      }
+    }
+    out[field.key] = best.phrase;
+  }
+  return out;
+}

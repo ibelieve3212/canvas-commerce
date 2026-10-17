@@ -275,21 +275,29 @@ function SliderControl({
 }) {
   const v = typeof value === "number" ? value : field.defaultValue;
   return (
-    <div className="flex items-center gap-3">
-      <input
-        type="range"
-        min={field.min}
-        max={field.max}
-        step={field.step}
-        value={v}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="flex-1 accent-[var(--color-accent)]"
-        aria-label={field.label}
-      />
-      <span className="w-16 shrink-0 text-right text-sm tabular-nums text-[var(--color-text)]">
-        {v}
-        {field.unit}
-      </span>
+    <div>
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={field.min}
+          max={field.max}
+          step={field.step}
+          value={v}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="flex-1 accent-[var(--color-accent)]"
+          aria-label={field.label}
+        />
+        <span className="w-16 shrink-0 text-right text-sm tabular-nums text-[var(--color-text)]">
+          {v}
+          {field.unit}
+        </span>
+      </div>
+      {(field.hintLow || field.hintHigh) && (
+        <div className="mt-1 flex justify-between text-xs text-[var(--color-text-muted)]">
+          {field.hintLow && <span>{field.hintLow}</span>}
+          {field.hintHigh && <span>{field.hintHigh}</span>}
+        </div>
+      )}
     </div>
   );
 }

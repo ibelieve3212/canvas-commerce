@@ -10,6 +10,9 @@
  *    - 每个任务快照记录自己的 sourceUploadId 与比例
  *    - 白底图用用户选的比例；精修/变清晰跟随原图宽高
  * 4. processJob 只加载任务绑定的那张源图（坏图不会拖垮好图）
+ * 5. 应用滑条（精修力度、买家秀真实度、海报构图随机）：levels 档位
+ *    映射（applySliderLevels）把数值翻译成给模型的明确指令短语，
+ *    裸数字对模型是猜谜
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
@@ -17,11 +20,13 @@ import path from "node:path";
 import { runMigrations } from "../../scripts/migrate.mjs";
 import { createSandbox, hasFixture } from "../fixtures/sandbox";
 
-import { ApplicationSchema, isAspectRatio, nearestAspectRatio } from "@/contracts/application";
-import { validateFormValues } from "@/contracts/generation";
+import { ApplicationSchema, isAspectRatio, nearestAspectRatio, type FormSchema } from "@/contracts/application";
+import { validateFormValues, applySliderLevels, applyCopyPriority, composePrompt } from "@/contracts/generation";
 import { whiteBackgroundApp } from "@/server/applications/apps/white-background";
 import { imageRetouchApp } from "@/server/applications/apps/image-retouch";
 import { imageClarityApp } from "@/server/applications/apps/image-clarity";
+import { buyerShowApp } from "@/server/applications/apps/buyer-show";
+import { posterApp } from "@/server/applications/apps/poster";
 import { builtinApplications } from "@/server/applications/seed";
 
 /* ---------- 纯函数：契约与定义（不依赖数据库） ---------- */
@@ -74,6 +79,81 @@ describe("图片处理工具：应用定义与契约", () => {
         source: Array.from({ length: 8 }, (_, i) => ({ uploadId: `u${i}` })),
       }).ok,
     ).toBe(true);
+  });
+
+  it("滑条越界被拒（reflection=150），范围内通过", () => {
+    const source = [{ uploadId: "u1" }];
+    const rejected = validateFormValues(imageRetouchApp.formSchema, {
+      source,
+      reflection: 150,
+    });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.errors.reflection).toContain("0-100");
+    expect(
+      validateFormValues(imageRetouchApp.formSchema, { source, reflection: 50 }).ok,
+    ).toBe(true);
+  });
+
+  it("精修有三个力度滑条（反光/光影/质感），各 5 档且带端点提示", () => {
+    const sliders = imageRetouchApp.formSchema.filter((f) => f.type === "slider");
+    expect(sliders.map((f) => f.key)).toEqual(["reflection", "relight", "texture"]);
+    for (const field of sliders) {
+      if (field.type !== "slider") continue;
+      expect(field.levels).toHaveLength(5);
+      expect(field.hintLow).toBeTruthy();
+      expect(field.hintHigh).toBeTruthy();
+    }
+  });
+
+  it("applySliderLevels：数值映射成最近档位的指令短语", () => {
+    const out = applySliderLevels(imageRetouchApp.formSchema, {
+      reflection: 30,
+      relight: 50,
+      texture: 90,
+    });
+    // 30 → 25 档；50 → 50 档；90 → 100 档
+    expect(out.reflection).toContain("杂物倒影");
+    expect(out.relight).toContain("体积感");
+    expect(out.texture).toContain("广告级");
+  });
+
+  it("applySliderLevels：缺省回落 defaultValue 档位，越界收敛到最近档", () => {
+    const out = applySliderLevels(imageRetouchApp.formSchema, { reflection: 150 });
+    expect(out.reflection).toContain("理想影棚");
+    expect(out.relight).toContain("体积感");
+    expect(out.texture).toContain("材质");
+  });
+
+  it("applySliderLevels：未声明 levels 的滑条裸数字透传（机制向后兼容）", () => {
+    const schema: FormSchema = [
+      { type: "slider", key: "s", label: "无档位滑条", required: false, min: 0, max: 100, step: 1, unit: "", defaultValue: 45 },
+    ];
+    const out = applySliderLevels(schema, { s: 45, keep: "原样" });
+    expect(out.s).toBe(45);
+    expect(out.keep).toBe("原样");
+  });
+
+  it("存量滑条接入档位：买家秀真实度、海报构图不再是裸数字", () => {
+    const b = applySliderLevels(buyerShowApp.formSchema, { realism: 45 });
+    expect(b.realism).toContain("自然生活感"); // 45 → 最近 50 档
+    const p = applySliderLevels(posterApp.formSchema, { layout_random: 30 });
+    expect(p.layout_random).toContain("稳妥"); // 30 → 最近 25 档
+    // prompt 里不再出现裸数字槽位残留
+    const prompt = composePrompt(
+      buyerShowApp.promptTemplate,
+      applySliderLevels(buyerShowApp.formSchema, { realism: 50 }),
+    );
+    expect(prompt).toContain("自然生活感");
+    expect(prompt).not.toMatch(/真实感：\d/);
+  });
+
+  it("默认值组装出的完整 prompt：含人影清理指令，无残留占位符", () => {
+    const values = applySliderLevels(imageRetouchApp.formSchema, applyCopyPriority({}));
+    const prompt = composePrompt(imageRetouchApp.promptTemplate, values);
+    expect(prompt).toContain("人影");
+    expect(prompt).toContain("磨砂、拉丝等表面工艺是商品的设计特征");
+    expect(prompt).toContain("构图、商品、场景与原图保持一致");
+    expect(prompt).not.toContain("{{");
   });
 
   it("nearestAspectRatio：按对数距离映射到最近支持比例", () => {

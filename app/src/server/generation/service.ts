@@ -16,7 +16,7 @@ import {
   getThrottleStats,
 } from "@/server/provider/throttle";
 import { env } from "@/lib/env";
-import { composePrompt, validateFormValues, applyCopyPriority, buildOutputDirective, buildPointDirective } from "@/contracts/generation";
+import { composePrompt, validateFormValues, applyCopyPriority, applySliderLevels, buildOutputDirective, buildPointDirective } from "@/contracts/generation";
 import { isAspectRatio, nearestAspectRatio } from "@/contracts/application";
 import type { Application, FormField } from "@/contracts/application";
 import type { FormValues } from "@/contracts/generation";
@@ -97,7 +97,8 @@ export async function createBatch(
   // ---- 通用：任务角色 + prompt 逐张指令 ----
   const roles = computeOutputRoles(app, requestedCount);
   // OPT-1: 文案优先级包装 — 注入 copy_directive 后再走 composePrompt
-  const valuesWithCopy = applyCopyPriority(input.formValues);
+  // 滑条档位：声明了 levels 的滑条在此把数值换成指令短语（详见 applySliderLevels）
+  const valuesWithCopy = applySliderLevels(app.formSchema, applyCopyPriority(input.formValues));
   // 传了参考人物图时，要明确要求照着它长，否则模型只把它当氛围参考
   const hasPersonRef = input.referenceImages.some((r) => r.role === "person");
 
