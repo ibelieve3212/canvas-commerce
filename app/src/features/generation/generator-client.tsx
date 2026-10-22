@@ -173,6 +173,40 @@ export function GeneratorClient({ app }: { app: Application }) {
   const needsCopyConfirm =
     usesCopyDirective && classifyCopySource(values) === "none";
 
+  // 主图文案来源提示（只提醒，不阻断）：
+  //   勾选「带卖点文字」+ 商品信息空 → 图上文字由模型自己提炼
+  //   不勾选 + 图片文案也空                 → 输出无字纯图
+  // 「图片文案」填了则以它为准，不用提醒（用户已经明确指定了字）。
+  // 没这两条提示的话，用户看到图上冒出自己没写过的字、或拿到一张
+  // 零文字的图，都会以为是生成失败。
+  const isMainImageForm = app.formSchema.some((f) => f.key === "include_selling_points");
+  const mainImageNotice = React.useMemo(() => {
+    if (!isMainImageForm) return null;
+    const filled = (key: string) =>
+      typeof values[key] === "string" && (values[key] as string).trim() !== "";
+    if (filled("copy")) return null;
+    if (values.include_selling_points === false) {
+      return {
+        title: "生成的会是不带文字的纯图片",
+        description:
+          "「主图带卖点文字」未勾选，「图片文案」也留空了，这批图不会出现任何文字。" +
+          "想让图上带字：勾选「主图带卖点文字」，或在「图片文案」里写要印的字。",
+        confirmLabel: "就要无文案的图",
+      };
+    }
+    if (!filled("info")) {
+      return {
+        title: "图上文案将由 AI 自行提炼",
+        description:
+          "「商品信息」留空了，图上的文字会由模型根据商品图自己提炼，可能写出商品图上看不清的卖点。" +
+          "想要更准：在「商品信息」里写上卖点/参数，文案会严格以它为唯一来源；" +
+          "想要无字纯图：取消勾选「主图带卖点文字」。",
+        confirmLabel: "让 AI 自己写",
+      };
+    }
+    return null;
+  }, [isMainImageForm, values]);
+
   // 提示里点名该应用实际有的那个卖点字段：详情页/海报叫「商品卖点」，
   // 主图叫「商品信息」。说错字段名用户会去找一个不存在的输入框。
   const copyFieldLabel = React.useMemo(() => {
@@ -309,7 +343,8 @@ export function GeneratorClient({ app }: { app: Application }) {
     // 出的是纯无字图。这是设计如此，但没提示的话像是生成不完整，
     // 用户会以为失败了又重跑一遍。只在模板真的吃 copy_directive 时才问——
     // 买家秀没有这个占位符，对它来说填不填文案都不影响输出。
-    if (needsCopyConfirm) {
+    // 主图那两条由 mainImageNotice 接管（文案不同）。
+    if (mainImageNotice || needsCopyConfirm) {
       setConfirmingNoCopy(true);
       return;
     }
@@ -498,28 +533,41 @@ export function GeneratorClient({ app }: { app: Application }) {
         />
       </div>
 
-      <ConfirmDialog
-        open={confirmingNoCopy}
-        tone="info"
-        title="这批图不会带任何文案"
-        description={
-          <>
-            <p>
-              「图片文案」
-              {copyFieldLabel ? `和「${copyFieldLabel}」` : ""}
-              都留空了，生成的会是纯画面、不带一个字的图。
-            </p>
-            <p className="mt-2">
-              想让图上出现文字：自己写「图片文案」会照原样印上去
-              {copyFieldLabel ? `，或填「${copyFieldLabel}」让 AI 自动提炼` : ""}。
-            </p>
-          </>
-        }
-        confirmLabel="就要无文案的图"
-        cancelLabel="返回填写"
-        onConfirm={() => void doSubmit()}
-        onCancel={() => setConfirmingNoCopy(false)}
-      />
+      {mainImageNotice ? (
+        <ConfirmDialog
+          open={confirmingNoCopy}
+          tone="info"
+          title={mainImageNotice.title}
+          description={<p>{mainImageNotice.description}</p>}
+          confirmLabel={mainImageNotice.confirmLabel}
+          cancelLabel="返回填写"
+          onConfirm={() => void doSubmit()}
+          onCancel={() => setConfirmingNoCopy(false)}
+        />
+      ) : (
+        <ConfirmDialog
+          open={confirmingNoCopy}
+          tone="info"
+          title="这批图不会带任何文案"
+          description={
+            <>
+              <p>
+                「图片文案」
+                {copyFieldLabel ? `和「${copyFieldLabel}」` : ""}
+                都留空了，生成的会是纯画面、不带一个字的图。
+              </p>
+              <p className="mt-2">
+                想让图上出现文字：自己写「图片文案」会照原样印上去
+                {copyFieldLabel ? `，或填「${copyFieldLabel}」让 AI 自动提炼` : ""}。
+              </p>
+            </>
+          }
+          confirmLabel="就要无文案的图"
+          cancelLabel="返回填写"
+          onConfirm={() => void doSubmit()}
+          onCancel={() => setConfirmingNoCopy(false)}
+        />
+      )}
     </div>
   );
 }

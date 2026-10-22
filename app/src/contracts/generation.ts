@@ -359,14 +359,21 @@ const BUYER_SHOW_PERSON_REF =
 /**
  * 主图「带卖点文字」开关（QQ1000 include_main_selling_points 口径）。
  *
- * 返回两段要注入 prompt 的指令：
- * - selling_points_directive：本张要不要把卖点写进画面
- * - copy_directive_override：仅在“关了卖点且用户又没写文案”时非空，
- *   用于覆盖 applyCopyPriority 给出的“基于卖点信息自动生成图片文案”——
- *   否则“不直接生成卖点文字”与“自动生成文案”两句会同时进 prompt 打架。
+ * 返回两段要注入 prompt 的指令：selling_points_directive（本张要不要把卖点
+ * 写进画面）与 copy_directive_override（仅在本函数明确要求时非空）。
  *
- * 注意：开关只管“卖点标签/卖点文案”；用户在“图片文案”里
- * 手写的文案仍然照写（用户明确要的字不该被开关静默吞掉）。
+ * 优先级（自上到下，命中即返回，互斥且无冲突）：
+ *   ① 「图片文案」填了      → 图上就写它，不许模型再自己加卖点标签
+ *   ② 未勾选开关            → 不写任何文字（覆盖 applyCopyPriority 的
+ *                             “基于卖点信息自动生成图片文案”）
+ *   ③ 勾选 + 有商品信息      → 从商品信息里提炼（给表达权，不给事实权）
+ *   ④ 勾选 + 无商品信息      → 模型自行提炼（需同时解除①以外的“禁止文字”
+ *                             禁令，否则两句打架）
+ *
+ * ③ 为什么不放开事实：电商主图的文案是合规敏感内容（广告法管的就是功效、
+ * 材质、价格这类事实声称）。只说“以用户为准”，模型仍会顺手加一句“医用级
+ * 不锈钢”——那句用户没写过、也没审过。所以只给“挑选/改写/精简/组织语气”
+ * 的表达权，不给“新增卖点、参数、材质声称、功效”的事实权。
  */
 export function buildSellingPointsContext(values: FormValues): {
   selling_points_directive: string;
@@ -376,17 +383,40 @@ export function buildSellingPointsContext(values: FormValues): {
   const userCopy = String(values.copy ?? "").trim();
   const include = values.include_selling_points !== false;
 
-  if (include) {
+  // ① 用户写了具体文案：以它为准。copy_directive 已是“图上写这段文案”，
+  //    这里只要拦住模型别再自己加卖点标签
+  if (userCopy) {
     return {
-      selling_points_directive: `主图需要呈现卖点，卖点/参数：${
-        info || "根据商品图提炼真实卖点、材质、功能和购买理由"
-      }`,
+      selling_points_directive: "图上文案按用户指定的内容执行，不要额外绘制卖点标签或其它文字",
     };
   }
+
+  // ② 没勾选：不上任何文字（含卖点标签），也不让模型自动生成文案
+  if (!include) {
+    return {
+      selling_points_directive:
+        "主图不直接生成卖点文字，只保留干净信息区或留白，不要绘制卖点标签",
+      copy_directive_override: "不要在图上写任何文字，只保留干净留白",
+    };
+  }
+
+  // ③ 勾选 + 有信息：以用户填写为唯一事实来源
+  if (info) {
+    return {
+      selling_points_directive:
+        `主图需要呈现卖点，卖点/参数：${info}\n` +
+        "图上文案必须以以上信息为唯一事实来源：可以按本张定位挑选、改写、精简、组织语气，" +
+        "但不要新增没有提供的卖点、参数、材质声称或功效。",
+    };
+  }
+
+  // ④ 勾选 + 无信息：模型自行提炼（QQ1000 的原文兜底）
   return {
     selling_points_directive:
-      "主图不直接生成卖点文字，只保留干净信息区或留白，不要绘制卖点标签",
-    ...(userCopy ? {} : { copy_directive_override: "不要在图上写任何文字，只保留干净留白" }),
+      "主图需要呈现卖点，卖点/参数：根据商品图提炼真实卖点、材质、功能和购买理由",
+    // 三个文案来源全空时 applyCopyPriority 会写“不要在图上写任何文字”，
+    // 与上面这句直接冲突（实测会同批随机出现有字/无字两种图），必须覆盖
+    copy_directive_override: "根据商品图自动生成简洁真实的图片文案",
   };
 }
 

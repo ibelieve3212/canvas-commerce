@@ -56,3 +56,6 @@ pnpm-debug.log*
 nul
 NUL
 npx
+
+# playwright-cli 会话文件（快照/日志/截图），不属于源码
+/.playwright-cli/
