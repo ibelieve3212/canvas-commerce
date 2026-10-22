@@ -45,6 +45,8 @@ function computeOutputCount(app: Application): number {
   if (app.outputConfig?.mode === "fixed") return app.outputConfig.count;
   // per_image 工具：计数由上传图数实时决定，这里的初始值只作占位
   if (app.outputConfig?.mode === "per_image") return 1;
+  // roles 模式：数量由用户勾选的类型数决定，这里的初始值只作占位
+  if (app.outputConfig?.mode === "roles") return 1;
   const opts = app.outputConfig?.options ?? [1];
   return opts[0];
 }
@@ -131,6 +133,15 @@ export function GeneratorClient({ app }: { app: Application }) {
   // 计数跟随已上传图数实时派生，不进 state、不占“生成数量”选择器。
   // 服务端会以图数为准（单一事实源），这里只保证提交体/按钮/进度条一致。
   const isPerImage = app.outputConfig?.mode === "per_image";
+  // roles 模式（主图）：用户勾选哪几种输出类型就生成几张。
+  // 值可能还没初始化（草稿恢复/批次恢复场景），此时回退到字段的默认勾选。
+  const selectedRoleCount = React.useMemo(() => {
+    if (app.outputConfig?.mode !== "roles") return 0;
+    const v = values.roles;
+    if (Array.isArray(v)) return (v as string[]).length;
+    const field = app.formSchema.find((f) => f.key === "roles");
+    return field?.type === "multiselect" ? (field.defaultValues?.length ?? 0) : 0;
+  }, [app.outputConfig, app.formSchema, values]);
   const perImageCount = React.useMemo(() => {
     if (!isPerImage) return 0;
     let n = 0;
@@ -144,7 +155,12 @@ export function GeneratorClient({ app }: { app: Application }) {
     }
     return n;
   }, [isPerImage, app.formSchema, values]);
-  const effectiveRequestedCount = isPerImage ? Math.max(1, perImageCount) : requestedCount;
+  const effectiveRequestedCount = isPerImage
+    ? Math.max(1, perImageCount)
+    : app.outputConfig?.mode === "roles"
+      // roles 模式：勾了哪几种就生成几张（服务端会按勾选过滤角色）
+      ? Math.max(1, selectedRoleCount)
+      : requestedCount;
 
   // 该应用的模板是否真的会用到文案指令。买家秀没有 {{copy_directive}}，
   // 它的输出与文案字段无关，不该为它弹这个确认。
@@ -304,7 +320,7 @@ export function GeneratorClient({ app }: { app: Application }) {
       const idempotencyKey = `${app.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
       // 从 formValues 中的 image 字段收集 referenceImages
-      const referenceImages: { uploadId: string; role: "product" | "style" | "person" | "brand" }[] = [];
+      const referenceImages: { uploadId: string; role: "product" | "style" | "person" | "brand" | "compare" }[] = [];
       for (const f of app.formSchema) {
         if (f.type === "image") {
           const val = values[f.key];
@@ -313,7 +329,7 @@ export function GeneratorClient({ app }: { app: Application }) {
               if (item.uploadId) {
                 referenceImages.push({
                   uploadId: item.uploadId,
-                  role: (f.roles?.[0] ?? "product") as "product" | "style" | "person" | "brand",
+                  role: (f.roles?.[0] ?? "product") as "product" | "style" | "person" | "brand" | "compare",
                 });
               }
             }
@@ -427,7 +443,7 @@ export function GeneratorClient({ app }: { app: Application }) {
                 ? perImageCount > 0
                   ? `开始处理（${perImageCount} 张）`
                   : "上传图片后开始"
-                : `生成 ${requestedCount} 张${app.name}`}
+                : `生成 ${effectiveRequestedCount} 张${app.name}`}
             </Button>
             {firstErrorKey && errors[firstErrorKey] && (
               <p className="mt-2 text-xs text-[var(--color-danger)]" role="alert">

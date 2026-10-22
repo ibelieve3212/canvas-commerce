@@ -236,8 +236,13 @@ function MultiSelectControl({
   onChange: (v: string[]) => void;
 }) {
   const toggle = (v: string) => {
-    if (value.includes(v)) onChange(value.filter((x) => x !== v));
-    else if (value.length < field.maxItems) onChange([...value, v]);
+    // 防御：选项 value 改名时，旧草稿/旧默认值里会残留已废弃的 value。
+    // 这类无效项虽然不显示为选中，却仍占着 maxItems 名额，
+    // 表现为“选项点不动、永远选不满”（实测：hero 改 hook 时踩过）。
+    // 所以添加新项前先把不在 options 里的值剔掉。
+    const valid = value.filter((x) => field.options.some((o) => o.value === x));
+    if (valid.includes(v)) onChange(valid.filter((x) => x !== v));
+    else if (valid.length < field.maxItems) onChange([...valid, v]);
   };
   return (
     <div className="flex flex-wrap gap-1.5">

@@ -11,7 +11,7 @@ const Body = z.object({
   formValues: z.record(z.string(), z.unknown()) as z.ZodType<FormValues>,
   referenceImages: z.array(z.object({
     uploadId: z.string().min(1),
-    role: z.enum(["product", "style", "person", "brand"]),
+    role: z.enum(["product", "style", "person", "brand", "compare"]),
   })).default([]),
   aspectRatio: AspectRatio,
   requestedCount: z.number().int().min(1).max(10),

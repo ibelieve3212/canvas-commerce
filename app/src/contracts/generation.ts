@@ -7,7 +7,7 @@ import { AspectRatioSchema } from "./application";
 /** 单张参考图的关联引用。提交时使用 uploadId + role。 */
 export const ReferenceImageInputSchema = z.object({
   uploadId: z.string(),
-  role: z.enum(["product", "style", "person", "brand"]),
+  role: z.enum(["product", "style", "person", "brand", "compare"]),
 });
 export type ReferenceImageInput = z.infer<typeof ReferenceImageInputSchema>;
 
@@ -164,6 +164,31 @@ const roleDescriptions: Record<string, string> = {
   style: "风格/版式参考图",
   person: "参考人物图",
   brand: "品牌参考图",
+  compare: "对比参考图（普通款/竞品/旧款，只作为被对比的对象，不要把它当主体画）",
+};
+
+/**
+ * 一次生成最多能发多少张参考图（商品主图 + 附加参考）。
+ *
+ * provider 侧有硬上限，发超了会被静默截断；prompt 里的“第N张”编号
+ * 必须与实际发图一致，否则模型会去找一张不存在的图。
+ * 两边共用这个常量，不要各自写死。
+ */
+export const MAX_PROVIDER_REFERENCE_IMAGES = 4;
+
+/**
+ * role → 发图/编号顺序（prompt 里的“第N张”与 provider 实际发图顺序必须一致）。
+ *
+ * compare 排第二（紧跟商品主图）是有原因的：上限有限，
+ * 排最后会被前面的参考图挤掉——对比图一旦拿不到对照物，整张图就废了。
+ * 所以它优先占名额。
+ */
+const refRoleOrder: Record<string, number> = {
+  product: 0,
+  compare: 1,
+  style: 2,
+  person: 3,
+  brand: 4,
 };
 
 /**
@@ -178,12 +203,11 @@ function buildRefImagesDesc(
   // 与 provider 发图顺序一致：product 图在 multipart 中是 image 主图（首先发送），
   // 其他角色为 image[] 额外参考。prompt 编号需与此一致，否则模型混淆。
   const sorted = [...referenceImages].sort((a, b) => {
-    const order: Record<string, number> = { product: 0, style: 1, person: 2, brand: 3 };
-    const aOrder = order[a.role] ?? 9;
-    const bOrder = order[b.role] ?? 9;
+    const aOrder = refRoleOrder[a.role] ?? 9;
+    const bOrder = refRoleOrder[b.role] ?? 9;
     return aOrder - bOrder;
   });
-  const parts = sorted.map((r, i) => {
+  const parts = sorted.slice(0, MAX_PROVIDER_REFERENCE_IMAGES).map((r, i) => {
     const desc = roleDescriptions[r.role] ?? r.role;
     return `第${i + 1}张为${desc}`;
   });
@@ -242,6 +266,8 @@ export interface OutputRoleInfo {
   outputRole: string;
   title: string;
   description?: string;
+  /** 画面骨架短词（景别/机位/背景/主体构成），成组差异化靠它互相避让。 */
+  shot?: string;
 }
 
 /**
@@ -259,19 +285,50 @@ const roleConstraints: Record<string, string> = {
   function: "以参数、结构图示或效果对比来证明功能，不要重复前面的卖点文案",
   closing: "以品牌信任背书和购买理由收尾，不要再堆商品卖点",
   // 主图 5 类型
-  selling_point: "只突出一个最强卖点，一句短文案，不要罗列多条",
-  // 实测（指环扣）：两个候选维度对该商品都不适用——“使用前后”无意义、
-  // “与普通版对比”缺差异点——模型被迫发明第三条路“修图前后”，
-  // 宣传的是修图水平而非商品价值，还有过度修图暗示的平台风险。
-  // 修法：点名禁止该失败模式，并给一条任何类目都走得通的兜底——
-  // “普通款的典型弱点”是模型从类目常识里就有的知识，也是真实电商
-  // 对比图的标准套路。另要求两侧同一构图，否则“对比”可信度打折。
+  // hook：主图第 1 张（搜索页门面）。与详情页首屏 hero 分开——
+  // 详情页首屏是"讲清楚是什么"，主图第 1 张是"让用户停下来"，要求不同。
+  hook:
+    "这是搜索结果页的第一张图，任务是让用户一眼看清这是什么并点进来：" +
+    "商品完整清晰、居中、占画面 60% 以上，背景干净（纯白或浅色纯色），" +
+    "最多一句 6-10 字的短卖点文案，不要堆文字、不要加边框装饰。" +
+    "不要出现价格、促销标识、‘限时抢购’‘买一送一’‘最低价’等促销词" +
+    "（平台会判为诱导点击并降权），不要加无关道具",
+  selling_point:
+    "只突出一个最强卖点，一句短文案，不要罗列多条；" +
+    "画面主体是商品的局部细节（扣件、边缘、表面工艺、接口、纹理），" +
+    "让买家看清做工，可以配一条指向该细节的短标注；" +
+    "不要整只商品加一句口号了事，也不要把局部拍成完整商品",
+  // 对比图（2026-10-22 按行业规范重写）：上一版把“不要左右分屏”写进了约束，
+  // 与电商做法正好相反——对比图本来就是并置对比（自家 vs 竞品/旧款/多版本同框），
+  // 禁掉分屏后模型没法并置，只能把两件东西一大一小散着放（实测：心形饰品对比图很怪）。
+  // 行业类型：同类竞品对比 / 新老版本对比 / 使用前后对比（效果类目）/ 材质工艺对比。
   compare:
-    "对比构图必须服务于商品价值，禁止修图前后、画质对比这类与商品无关的对比。" +
-    "对比维度按商品类型选择：能自然展示使用效果的商品（护肤、清洁、收纳等）用使用前后对比；" +
-    "其余做本款与普通款对比，差异点优先取自商品信息，信息不足时用该类目普通款的典型弱点构造。" +
-    "对比两侧用同一构图、同一商品，只变化被对比的状态",
-  mood: "以节日/促销/季节氛围营造为主，商品融入氛围",
+    "对比图的任务是让买家一眼看出差别，必须有明确的对照物：" +
+    "① 素材里标注为“对比参考图”的那张（普通款/竞品/旧款）就是对照物；" +
+    "② 没有对照素材时，用商品信息里写明的差异，与该类目普通款对照；" +
+    "③ 商品信息也没写差异时，改做款式/版本对比（把商品图里的其他颜色或款式并排），" +
+    "或材质工艺对比（做工细节 vs 普通工艺的粗糙感）；" +
+    "④ 清洁、护肤、收纳等效果类目可做使用前后对比，效果要真实可验证。" +
+    "画面规格：对照双方并置同框（左右或上下分区都可以，各占一半），" +
+    "各自清晰可辨不重叠，同一背景、同一光线、同一商品，只变化被对比的那一项，" +
+    "并用短标注或箭头点出差异点。" +
+    "禁止：修图前后对比（宣传的是修图水平不是商品价值）、画质清晰度对比、" +
+    "贬低竞品的表述、编造商品信息里没有的差异",
+  // 加固（2026-10-22）：原文“商品融入氛围”与 PRODUCT_FIDELITY 正面冲突
+  // （实测：氛围主图商品被氛围光染色/变形）。改成"氛围由背景承载、商品保持原貌"，
+  // 并明确商品保真优先于氛围表现。
+  mood:
+    "氛围图的任务是营造情绪，但商品是主体、氛围是衬托：" +
+    "氛围只由背景、光效、色温、空间层次和少量相关元素承载，" +
+    "商品保持商品图里的原貌，外形、配色、材质、图案和 Logo 位置都不变，" +
+    "禁止让商品变形、换色、融化、迎合背景色或被氛围光染色。" +
+    "商品要占画面 40% 以上、完整入画、不被裁切、不被道具遮挡，" +
+    "轮廓不能被背景暖光或亮色冲淡（缩略图第一眼看到的必须是商品，不是装饰）。" +
+    "氛围元素必须与商品用途或使用场景相关（桌面、床头、妆台、随身包、衣饰，" +
+    "或与节庆匹配的装饰），禁止用水果、食物、香料、餐具等无关静物凑画面，也不要堆砌装饰物。" +
+    "参考图只提供光影方向、色温、虚实关系和氛围情绪，参考图里的旧商品、旧包装、" +
+    "背景杂物和人物一律不得出现在结果里，也不要把参考图的旧商品位置当成必须复刻的构图。" +
+    "商品保真优先于氛围表现：氛围与商品冲突时削弱氛围，不改商品",
 };
 
 /**
@@ -301,8 +358,9 @@ const NO_META_TEXT =
  */
 const PRODUCT_FIDELITY =
   "画面中的商品必须与商品图完全一致：外形轮廓、比例、材质纹理、" +
-  "配色与图案细节都要严格还原，只允许改变拍摄角度、光线和所处环境，" +
-  "不要重新设计商品，不要替换成外观相似的其它产品";
+  "配色与图案细节都要严格还原，不要重新设计商品，不要替换成外观相似的其它产品；" +
+  "拍摄角度、光线、所处环境、背景和构图可以按本张定位与参考图要求改变，" +
+  "但商品本身的外观、颜色、材质和 Logo/纹理位置不得改变";
 
 /**
  * 买家秀多张时的人物一致性约束。
@@ -333,11 +391,13 @@ const BUYER_SHOW_PERSON_REF =
  * @param role      该张图的角色定义；无定义时返回空串
  * @param total     本批次总张数，用于告知模型"这是第 N 张、共 M 张"
  * @param opts      hasPersonRef: 是否上传了参考人物图（买家秀用）
+ *                  siblings: 本批次实际会生成的角色清单，用于告诉模型
+ *                  “同组其它张分别占用了哪些画面骨架”，它才知道要避开什么
  */
 export function buildOutputDirective(
   role: OutputRoleInfo | undefined,
   total: number,
-  opts?: { hasPersonRef?: boolean },
+  opts?: { hasPersonRef?: boolean; siblings?: OutputRoleInfo[] },
 ): string {
   if (!role) return "";
 
@@ -372,10 +432,35 @@ export function buildOutputDirective(
   if (constraint) parts.push(constraint);
 
   if (total > 1) {
+    // 同组骨架清单：模型每次只看到自己这一次的调用，不知道另外几张长什么样，
+    // 只能凭角色名猜，5 个角色名在它眼里都是“电商主图” → 画出来雷同。
+    // 把同组每张的骨架显式列出，它才知道该避开什么。
+    const siblingShots = (opts?.siblings ?? [])
+      .filter((s) => s.outputIndex !== role.outputIndex)
+      .map((s) => `${s.outputIndex} ${s.title}${s.shot ? `＝${s.shot}` : ""}`)
+      .join("、");
+    if (siblingShots) {
+      parts.push(
+        `本组 ${total} 张的画面骨架已分别占用：${siblingShots}。` +
+          `本张（第 ${role.outputIndex} 张）的画面骨架必须与上面每张都明显不同：` +
+          `景别、机位、背景类型、主体数量与摆放方式中至少两项要换掉，` +
+          `不能是同一张图换个角度或换个背景的版本`,
+      );
+    }
     parts.push(
       "严格只做本张的定位，不要把其它张的内容和文案堆到这张上；" +
-        "与同组其它张保持一致的视觉风格、配色与品牌调性",
+        "与同组其它张保持同一品牌调性（配色体系、质感档次、字体与文案风格一致），" +
+        "但画面骨架必须明显不同",
     );
+    // 多 SKU 商品（上传了多个颜色/款式）时，每张都铺满全部款式会互相撞车
+    // 对比图是例外：它要么并置不同款式做版本对比，要么并置本款与普通款，
+    // 就是要“多个商品同框”。不豁免的话，这条会和对比图的指令互相打架。
+    if (role.outputRole !== "compare") {
+      parts.push(
+        "商品图里若有多个款式或颜色，本张只呈现本张定位需要的那 1-2 个，" +
+          "不要每次都把全部款式平铺成一片；本组各张尽量覆盖不同款式组合",
+      );
+    }
   }
 
   parts.push(PRODUCT_FIDELITY);

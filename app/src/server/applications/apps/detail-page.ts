@@ -13,12 +13,12 @@ export const detailPageApp: Application = {
   tags: ["详情页", "长图"],
   outputConfig: { mode: "fixed", count: 6 },
   outputRoles: [
-    { outputIndex: 1, outputRole: "hero", title: "首屏主视觉", description: "商品定位 + 核心利益点" },
-    { outputIndex: 2, outputRole: "selling_points", title: "卖点总览", description: "3-5 个核心卖点" },
-    { outputIndex: 3, outputRole: "scene", title: "场景代入", description: "真实使用场景" },
-    { outputIndex: 4, outputRole: "material", title: "材质细节", description: "局部放大 + 工艺质感" },
-    { outputIndex: 5, outputRole: "function", title: "功能证明", description: "参数、结构或效果说明" },
-    { outputIndex: 6, outputRole: "closing", title: "收尾转化", description: "品牌信任 + 购买理由" },
+    { outputIndex: 1, outputRole: "hero", title: "首屏主视觉", shot: "整屏主视觉·商品居中偏上·文案区在下·浅色干净背景", description: "商品定位 + 核心利益点" },
+    { outputIndex: 2, outputRole: "selling_points", title: "卖点总览", shot: "文案主导·商品只露局部或小图·纯色背景·条目式排布", description: "3-5 个核心卖点" },
+    { outputIndex: 3, outputRole: "scene", title: "场景代入", shot: "环境内中景·真实使用情境·商品在环境中·实景氛围", description: "真实使用场景" },
+    { outputIndex: 4, outputRole: "material", title: "材质细节", shot: "微距特写·只拍材质表面·背景虚化", description: "局部放大 + 工艺质感" },
+    { outputIndex: 5, outputRole: "function", title: "功能证明", shot: "结构示意或参数图解·平铺白底·线条标注", description: "参数、结构或效果说明" },
+    { outputIndex: 6, outputRole: "closing", title: "收尾转化", shot: "大面积留白·商品小尺寸居中·品牌感收尾", description: "品牌信任 + 购买理由" },
   ],
   defaultAspectRatio: "3:4",
   formSchema: [

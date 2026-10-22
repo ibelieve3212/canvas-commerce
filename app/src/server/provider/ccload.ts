@@ -15,6 +15,7 @@ import {
   ProviderError,
 } from "./types";
 import { maskApiKey, maskBaseUrl } from "@/server/log/sanitize";
+import { MAX_PROVIDER_REFERENCE_IMAGES } from "@/contracts/generation";
 
 // 宽高比 → size 映射（gpt-image-2 支持 1024x1024 / 1024x1536 / 1536x1024）
 function aspectRatioToSize(ratio: string): string {
@@ -73,9 +74,16 @@ export class CcloadProvider implements ImageGenerationProvider {
       const otherImages = request.referenceImages.filter(r => r.role !== "product");
 
       // 发图顺序与 prompt 中 {{ref_images}} 的编号一致：
-      // product 第 1 张，其余按 style/person/brand 顺序在后
+      // product 第 1 张，其余按 compare/style/person/brand 顺序在后
+      // （refRoleOrder 与 contracts/generation.ts 里的编号顺序保持一致）
+      // compare 排第二：上限 4 张图，排最后会被前面的参考图挤掉，
+      // 对比图拿不到对照物就废了，优先级必须高于风格参考图。
+      const otherOrder: Record<string, number> = { compare: 1, style: 2, person: 3, brand: 4 };
+      const sortedOthers = [...otherImages].sort(
+        (a, b) => (otherOrder[a.role] ?? 9) - (otherOrder[b.role] ?? 9),
+      );
       const ordered = productImages.length > 0
-        ? [productImages[0], ...otherImages]
+        ? [productImages[0], ...sortedOthers]
         : [...request.referenceImages];
 
       const extOf = (mime: string) =>
@@ -85,10 +93,11 @@ export class CcloadProvider implements ImageGenerationProvider {
           : role === "style" ? "style"
             : role === "person" ? "person"
               : role === "brand" ? "brand"
-                : "ref";
+                : role === "compare" ? "compare"
+                  : "ref";
 
-      // 上限 4 张：主图 + 最多 3 张附加参考
-      for (let i = 0; i < ordered.length && i < 4; i++) {
+      // 上限：商品主图 + 最多 3 张附加参考（与 prompt 里的“第N张”编号共用同一常量）
+      for (let i = 0; i < ordered.length && i < MAX_PROVIDER_REFERENCE_IMAGES; i++) {
         const img = ordered[i];
         formData.append(
           "image",

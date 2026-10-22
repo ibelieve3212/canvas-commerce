@@ -192,7 +192,7 @@ export const ImageFieldSchema = z.object({
   max: z.number().int().min(1).max(8).default(6),
   roles: z
     .array(
-      z.enum(["product", "style", "person", "brand"]),
+      z.enum(["product", "style", "person", "brand", "compare"]),
     )
     .optional()
     .default([]),
@@ -234,6 +234,15 @@ export const OutputConfigSchema = z
       options: z.array(z.number().int().min(1).max(6)),
     }),
     z.object({
+      /**
+       * roles：由用户勾选要生成哪些输出角色，生成数量 = 勾选数。
+       *
+       * 与 selectable 的区别：selectable 只能选“生成几张”（取前 N 个角色），
+       * 用户没法表达“我只要场景图和对比图”。主图用这个模式。
+       */
+      mode: z.literal("roles"),
+    }),
+    z.object({
       mode: z.literal("per_image"),
       max: z.number().int().min(1).max(8),
     }),
@@ -247,6 +256,16 @@ export const OutputRoleSchema = z.object({
   outputRole: z.string(),
   title: z.string(),
   description: z.string().optional().default(""),
+  /**
+   * 画面骨架短词（景别/机位/背景/主体构成）。
+   *
+   * 为什么加：成组输出时每张图是独立一次调用，模型看不到同组其它张，
+   * 只知道“这是第 N 张：吸睛图”这种角色名，于是 5 个角色名在它眼里都是
+   * “电商主图”，画出来自然雷同（实测：主图 5 张全是散落商品平铺）。
+   * 把每张的“骨架”显式写出来，并告诉模型同组其它张占了哪些骨架，
+   * 模型才知道要避开什么。
+   */
+  shot: z.string().optional().default(""),
 });
 export type OutputRole = z.infer<typeof OutputRoleSchema>;
 

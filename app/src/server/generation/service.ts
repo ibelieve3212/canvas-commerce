@@ -32,7 +32,7 @@ export interface CreateBatchInput {
   userId: string;
   applicationId: string;
   formValues: FormValues;
-  referenceImages: { uploadId: string; role: "product" | "style" | "person" | "brand" }[];
+  referenceImages: { uploadId: string; role: "product" | "style" | "person" | "brand" | "compare" }[];
   aspectRatio: "1:1" | "4:5" | "3:4" | "16:9" | "9:16";
   requestedCount: number;
   idempotencyKey?: string;
@@ -95,7 +95,12 @@ export async function createBatch(
   const batchAspectRatio = (perJobAspectRatios?.[0] ?? input.aspectRatio) as CreateBatchInput["aspectRatio"];
 
   // ---- 通用：任务角色 + prompt 逐张指令 ----
-  const roles = computeOutputRoles(app, requestedCount);
+  // roles 模式（主图）：用户勾选了要生成哪几种输出类型，按勾选结果生成。
+  // 老批次的 formValues 里没有 roles（空数组），这时沿用“取前 N 个”的数量规则。
+  const selectedRoles = Array.isArray(input.formValues.roles)
+    ? (input.formValues.roles as string[]).filter((r) => typeof r === "string")
+    : [];
+  const roles = computeOutputRoles(app, requestedCount, selectedRoles);
   // OPT-1: 文案优先级包装 — 注入 copy_directive 后再走 composePrompt
   // 滑条档位：声明了 levels 的滑条在此把数值换成指令短语（详见 applySliderLevels）
   const valuesWithCopy = applySliderLevels(app.formSchema, applyCopyPriority(input.formValues));
@@ -147,13 +152,21 @@ export async function createBatch(
         ...valuesWithCopy,
         output_directive: buildOutputDirective(role, roles.length, {
           hasPersonRef,
+          // 把同组实际会生成的角色清单传进去：每张图要知道其它张占了哪些
+          // 画面骨架，才不会 5 张画成雷同图（实测：主图 5 张全是散落平铺）
+          siblings: roles,
         }),
         point_directive: buildPointDirective(valuesWithCopy, role, roles.length),
       };
+      // 对比素材（普通款/竞品）只给“对比图”那一个任务。
+      // 混进其它 4 张会让模型把竞品也当成商品画出来，5 张全变对照物。
+      const roleRefImages = input.referenceImages.filter(
+        (r) => r.role !== "compare" || role.outputRole === "compare",
+      );
       const prompt = composePrompt(
         app.promptTemplate,
         perOutputValues,
-        input.referenceImages,
+        roleRefImages,
       );
 
       // per_image 工具：快照里记上本任务专属的源图与比例，
@@ -202,9 +215,19 @@ export async function createBatch(
 function computeOutputRoles(
   app: Application,
   count: number,
-): Array<{ outputIndex: number; outputRole: string; title: string; description: string }> {
+  selectedRoles: string[] = [],
+): Array<{ outputIndex: number; outputRole: string; title: string; description: string; shot: string }> {
   if (app.outputRoles.length > 0) {
-    return app.outputRoles.slice(0, count).map((r) => ({ ...r, description: r.description ?? "" }));
+    // 勾选了类型就按勾选（支持任意组合），没勾就按数量取前 N 个（老批次行为）
+    const picked =
+      selectedRoles.length > 0
+        ? app.outputRoles.filter((r) => selectedRoles.includes(r.outputRole))
+        : app.outputRoles.slice(0, count);
+    return picked.map((r) => ({
+      ...r,
+      description: r.description ?? "",
+      shot: r.shot ?? "",
+    }));
   }
   // 图片处理工具：任务与上传图一一对应，角色名用 image_ 前缀。
   // 不能落入 variant_ 兕底——那会触发 buildOutputDirective 的"人物一致、只变机位"
@@ -215,6 +238,7 @@ function computeOutputRoles(
       outputRole: `image_${i + 1}`,
       title: `第 ${i + 1} 张`,
       description: "",
+      shot: "",
     }));
   }
   // 未声明 outputRoles 的应用（海报、买家秀）：海报按卖点轮转，
@@ -227,6 +251,7 @@ function computeOutputRoles(
     outputRole: isPoster ? `point_${i + 1}` : `variant_${i + 1}`,
     title: isPoster ? `卖点海报 ${i + 1}` : `${app.name} ${i + 1}`,
     description: isPoster ? "围绕分配到的单个卖点做画面主体" : "",
+    shot: "",
   }));
 }
 
@@ -346,11 +371,15 @@ export async function processJob(jobId: string): Promise<void> {
   // per_image 工具：任务快照里记了 sourceUploadId，只取绑定的那一张；
   // 其余应用维持批次级语义（N 输出共享全部素材）。
   const inputSnapshot = JSON.parse(job.batch.inputSnapshotJson) as {
-    referenceImages?: { uploadId: string; role: "product" | "style" | "person" | "brand" }[];
+    referenceImages?: { uploadId: string; role: "product" | "style" | "person" | "brand" | "compare" }[];
   };
+  // 对比素材只发给对比图任务（与 createBatch 里的 prompt 过滤保持一致）
+  const scopedRefImages = (inputSnapshot.referenceImages ?? []).filter(
+    (r) => r.role !== "compare" || job.outputRole === "compare",
+  );
   const refImages = promptData.sourceUploadId
-    ? (inputSnapshot.referenceImages ?? []).filter((r) => r.uploadId === promptData.sourceUploadId)
-    : (inputSnapshot.referenceImages ?? []);
+    ? scopedRefImages.filter((r) => r.uploadId === promptData.sourceUploadId)
+    : scopedRefImages;
 
   // 批量查 Upload 记录并加载图片二进制。
   // 放进下面的 try：文件缺失（storage.get ENOENT）曾是裸抛，

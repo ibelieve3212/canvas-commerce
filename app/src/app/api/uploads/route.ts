@@ -17,7 +17,7 @@ import { generateThumbnail } from "@/server/storage/thumbnail";
  * POST /api/uploads — 直接上传文件（local 存储模式）。
  * 阶段6可改为 presign + complete 两步。
  *
- * multipart/form-data: file=Blob, role=product|style|person|brand
+ * multipart/form-data: file=Blob, role=product|style|person|brand|compare
  */
 export async function POST(req: NextRequest) {
   const requestId = crypto.randomUUID();
