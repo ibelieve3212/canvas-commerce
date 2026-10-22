@@ -74,11 +74,9 @@ export class CcloadProvider implements ImageGenerationProvider {
       const otherImages = request.referenceImages.filter(r => r.role !== "product");
 
       // 发图顺序与 prompt 中 {{ref_images}} 的编号一致：
-      // product 第 1 张，其余按 compare/style/person/brand 顺序在后
+      // product 第 1 张，其余按 style/person/brand 顺序在后
       // （refRoleOrder 与 contracts/generation.ts 里的编号顺序保持一致）
-      // compare 排第二：上限 4 张图，排最后会被前面的参考图挤掉，
-      // 对比图拿不到对照物就废了，优先级必须高于风格参考图。
-      const otherOrder: Record<string, number> = { compare: 1, style: 2, person: 3, brand: 4 };
+      const otherOrder: Record<string, number> = { style: 1, person: 2, brand: 3 };
       const sortedOthers = [...otherImages].sort(
         (a, b) => (otherOrder[a.role] ?? 9) - (otherOrder[b.role] ?? 9),
       );
@@ -93,8 +91,7 @@ export class CcloadProvider implements ImageGenerationProvider {
           : role === "style" ? "style"
             : role === "person" ? "person"
               : role === "brand" ? "brand"
-                : role === "compare" ? "compare"
-                  : "ref";
+                : "ref";
 
       // 上限：商品主图 + 最多 3 张附加参考（与 prompt 里的“第N张”编号共用同一常量）
       for (let i = 0; i < ordered.length && i < MAX_PROVIDER_REFERENCE_IMAGES; i++) {

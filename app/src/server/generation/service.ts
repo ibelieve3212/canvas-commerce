@@ -16,7 +16,7 @@ import {
   getThrottleStats,
 } from "@/server/provider/throttle";
 import { env } from "@/lib/env";
-import { composePrompt, validateFormValues, applyCopyPriority, applySliderLevels, buildOutputDirective, buildPointDirective } from "@/contracts/generation";
+import { composePrompt, validateFormValues, applyCopyPriority, applySliderLevels, buildOutputDirective, buildPointDirective, buildSellingPointsContext } from "@/contracts/generation";
 import { isAspectRatio, nearestAspectRatio } from "@/contracts/application";
 import type { Application, FormField } from "@/contracts/application";
 import type { FormValues } from "@/contracts/generation";
@@ -32,7 +32,7 @@ export interface CreateBatchInput {
   userId: string;
   applicationId: string;
   formValues: FormValues;
-  referenceImages: { uploadId: string; role: "product" | "style" | "person" | "brand" | "compare" }[];
+  referenceImages: { uploadId: string; role: "product" | "style" | "person" | "brand" }[];
   aspectRatio: "1:1" | "4:5" | "3:4" | "16:9" | "9:16";
   requestedCount: number;
   idempotencyKey?: string;
@@ -103,9 +103,19 @@ export async function createBatch(
   const roles = computeOutputRoles(app, requestedCount, selectedRoles);
   // OPT-1: 文案优先级包装 — 注入 copy_directive 后再走 composePrompt
   // 滑条档位：声明了 levels 的滑条在此把数值换成指令短语（详见 applySliderLevels）
-  const valuesWithCopy = applySliderLevels(app.formSchema, applyCopyPriority(input.formValues));
+  const withCopy = applySliderLevels(app.formSchema, applyCopyPriority(input.formValues));
   // 传了参考人物图时，要明确要求照着它长，否则模型只把它当氛围参考
   const hasPersonRef = input.referenceImages.some((r) => r.role === "person");
+
+  // ---- 主图「带卖点文字」开关（QQ1000 include_main_selling_points 口径） ----
+  // 详细语义见 buildSellingPointsContext
+  const spCtx = buildSellingPointsContext(input.formValues);
+  // 用模板是否声明占位符来门控（与前端 usesCopyDirective 同一手法）：
+  // 只有主图模板吃这两段指令，不要让这堆逻辑影响其它应用
+  const usesSellingPointsDirective = app.promptTemplate.includes("{{selling_points_directive}}");
+  const valuesWithCopy = usesSellingPointsDirective && spCtx.copy_directive_override
+    ? { ...withCopy, copy_directive: spCtx.copy_directive_override }
+    : withCopy;
 
   const inputSnapshot = {
     applicationId: input.applicationId,
@@ -152,21 +162,18 @@ export async function createBatch(
         ...valuesWithCopy,
         output_directive: buildOutputDirective(role, roles.length, {
           hasPersonRef,
-          // 把同组实际会生成的角色清单传进去：每张图要知道其它张占了哪些
-          // 画面骨架，才不会 5 张画成雷同图（实测：主图 5 张全是散落平铺）
+          // 同组角色清单只给详情页用（画面骨架避让）；
+          // 主图按 QQ1000 口径走轻量路径，不看 siblings
           siblings: roles,
         }),
         point_directive: buildPointDirective(valuesWithCopy, role, roles.length),
+        // 主图「带卖点文字」开关 → 上游 include_main_selling_points 口径
+        selling_points_directive: spCtx.selling_points_directive,
       };
-      // 对比素材（普通款/竞品）只给“对比图”那一个任务。
-      // 混进其它 4 张会让模型把竞品也当成商品画出来，5 张全变对照物。
-      const roleRefImages = input.referenceImages.filter(
-        (r) => r.role !== "compare" || role.outputRole === "compare",
-      );
       const prompt = composePrompt(
         app.promptTemplate,
         perOutputValues,
-        roleRefImages,
+        input.referenceImages,
       );
 
       // per_image 工具：快照里记上本任务专属的源图与比例，
@@ -371,15 +378,11 @@ export async function processJob(jobId: string): Promise<void> {
   // per_image 工具：任务快照里记了 sourceUploadId，只取绑定的那一张；
   // 其余应用维持批次级语义（N 输出共享全部素材）。
   const inputSnapshot = JSON.parse(job.batch.inputSnapshotJson) as {
-    referenceImages?: { uploadId: string; role: "product" | "style" | "person" | "brand" | "compare" }[];
+    referenceImages?: { uploadId: string; role: "product" | "style" | "person" | "brand" }[];
   };
-  // 对比素材只发给对比图任务（与 createBatch 里的 prompt 过滤保持一致）
-  const scopedRefImages = (inputSnapshot.referenceImages ?? []).filter(
-    (r) => r.role !== "compare" || job.outputRole === "compare",
-  );
   const refImages = promptData.sourceUploadId
-    ? scopedRefImages.filter((r) => r.uploadId === promptData.sourceUploadId)
-    : scopedRefImages;
+    ? (inputSnapshot.referenceImages ?? []).filter((r) => r.uploadId === promptData.sourceUploadId)
+    : (inputSnapshot.referenceImages ?? []);
 
   // 批量查 Upload 记录并加载图片二进制。
   // 放进下面的 try：文件缺失（storage.get ENOENT）曾是裸抛，

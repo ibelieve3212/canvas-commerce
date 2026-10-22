@@ -7,7 +7,7 @@ import { AspectRatioSchema } from "./application";
 /** 单张参考图的关联引用。提交时使用 uploadId + role。 */
 export const ReferenceImageInputSchema = z.object({
   uploadId: z.string(),
-  role: z.enum(["product", "style", "person", "brand", "compare"]),
+  role: z.enum(["product", "style", "person", "brand"]),
 });
 export type ReferenceImageInput = z.infer<typeof ReferenceImageInputSchema>;
 
@@ -164,7 +164,6 @@ const roleDescriptions: Record<string, string> = {
   style: "风格/版式参考图",
   person: "参考人物图",
   brand: "品牌参考图",
-  compare: "对比参考图（普通款/竞品/旧款，只作为被对比的对象，不要把它当主体画）",
 };
 
 /**
@@ -178,17 +177,13 @@ export const MAX_PROVIDER_REFERENCE_IMAGES = 4;
 
 /**
  * role → 发图/编号顺序（prompt 里的“第N张”与 provider 实际发图顺序必须一致）。
- *
- * compare 排第二（紧跟商品主图）是有原因的：上限有限，
- * 排最后会被前面的参考图挤掉——对比图一旦拿不到对照物，整张图就废了。
- * 所以它优先占名额。
+ * 商品主图永远第 1 张，其余参考图按 style/person/brand 依次跟上。
  */
 const refRoleOrder: Record<string, number> = {
   product: 0,
-  compare: 1,
-  style: 2,
-  person: 3,
-  brand: 4,
+  style: 1,
+  person: 2,
+  brand: 3,
 };
 
 /**
@@ -266,13 +261,34 @@ export interface OutputRoleInfo {
   outputRole: string;
   title: string;
   description?: string;
-  /** 画面骨架短词（景别/机位/背景/主体构成），成组差异化靠它互相避让。 */
+  /**
+   * 画面骨架短词（景别/机位/背景/主体构成）。
+   *
+   * 仅详情页在用。主图（main_ 前缀）已全面改用位次意图，不再写死骨架：
+   * 实测写死骨架反而制造问题（氛围图的“多件成组散落”直接导致商品
+   * 被裁到画面边缘，“道具与商品用途相关”则把橙子片肉桂棒引了进来）。
+   */
   shot?: string;
 }
 
 /**
  * 各 role 的额外约束。`title`/`description` 说的是"做什么"，
  * 这里补的是"别做什么"——后者才是防止每张都退化成大杂烧的关键。
+ */
+/**
+ * 主图位次的 role 前缀（如 main_scene）。
+ *
+ * 详情页也有 scene 这类同名 role，两者的约束诉求不同（详情页场景图
+ * 要“配一句点题文案”，主图不需要），用前缀把两条路径彻底隔开。
+ */
+export const MAIN_IMAGE_ROLE_PREFIX = "main_";
+
+/**
+ * 各 role 的额外约束。`title`/`description` 说的是"做什么"，
+ * 这里补的是"别做什么"——后者才是防止每张都退化成大杂烧的关键。
+ *
+ * 只服务详情页 6 个位次：主图（main_ 前缀）走 QQ1000 的轻量路径，
+ * 不用这张表（见 buildOutputDirective 里的说明）。
  */
 const roleConstraints: Record<string, string> = {
   // 详情页 6 模块
@@ -284,51 +300,6 @@ const roleConstraints: Record<string, string> = {
   material: "聚焦材质与工艺的局部放大特写，只标注与该细节相关的短说明",
   function: "以参数、结构图示或效果对比来证明功能，不要重复前面的卖点文案",
   closing: "以品牌信任背书和购买理由收尾，不要再堆商品卖点",
-  // 主图 5 类型
-  // hook：主图第 1 张（搜索页门面）。与详情页首屏 hero 分开——
-  // 详情页首屏是"讲清楚是什么"，主图第 1 张是"让用户停下来"，要求不同。
-  hook:
-    "这是搜索结果页的第一张图，任务是让用户一眼看清这是什么并点进来：" +
-    "商品完整清晰、居中、占画面 60% 以上，背景干净（纯白或浅色纯色），" +
-    "最多一句 6-10 字的短卖点文案，不要堆文字、不要加边框装饰。" +
-    "不要出现价格、促销标识、‘限时抢购’‘买一送一’‘最低价’等促销词" +
-    "（平台会判为诱导点击并降权），不要加无关道具",
-  selling_point:
-    "只突出一个最强卖点，一句短文案，不要罗列多条；" +
-    "画面主体是商品的局部细节（扣件、边缘、表面工艺、接口、纹理），" +
-    "让买家看清做工，可以配一条指向该细节的短标注；" +
-    "不要整只商品加一句口号了事，也不要把局部拍成完整商品",
-  // 对比图（2026-10-22 按行业规范重写）：上一版把“不要左右分屏”写进了约束，
-  // 与电商做法正好相反——对比图本来就是并置对比（自家 vs 竞品/旧款/多版本同框），
-  // 禁掉分屏后模型没法并置，只能把两件东西一大一小散着放（实测：心形饰品对比图很怪）。
-  // 行业类型：同类竞品对比 / 新老版本对比 / 使用前后对比（效果类目）/ 材质工艺对比。
-  compare:
-    "对比图的任务是让买家一眼看出差别，必须有明确的对照物：" +
-    "① 素材里标注为“对比参考图”的那张（普通款/竞品/旧款）就是对照物；" +
-    "② 没有对照素材时，用商品信息里写明的差异，与该类目普通款对照；" +
-    "③ 商品信息也没写差异时，改做款式/版本对比（把商品图里的其他颜色或款式并排），" +
-    "或材质工艺对比（做工细节 vs 普通工艺的粗糙感）；" +
-    "④ 清洁、护肤、收纳等效果类目可做使用前后对比，效果要真实可验证。" +
-    "画面规格：对照双方并置同框（左右或上下分区都可以，各占一半），" +
-    "各自清晰可辨不重叠，同一背景、同一光线、同一商品，只变化被对比的那一项，" +
-    "并用短标注或箭头点出差异点。" +
-    "禁止：修图前后对比（宣传的是修图水平不是商品价值）、画质清晰度对比、" +
-    "贬低竞品的表述、编造商品信息里没有的差异",
-  // 加固（2026-10-22）：原文“商品融入氛围”与 PRODUCT_FIDELITY 正面冲突
-  // （实测：氛围主图商品被氛围光染色/变形）。改成"氛围由背景承载、商品保持原貌"，
-  // 并明确商品保真优先于氛围表现。
-  mood:
-    "氛围图的任务是营造情绪，但商品是主体、氛围是衬托：" +
-    "氛围只由背景、光效、色温、空间层次和少量相关元素承载，" +
-    "商品保持商品图里的原貌，外形、配色、材质、图案和 Logo 位置都不变，" +
-    "禁止让商品变形、换色、融化、迎合背景色或被氛围光染色。" +
-    "商品要占画面 40% 以上、完整入画、不被裁切、不被道具遮挡，" +
-    "轮廓不能被背景暖光或亮色冲淡（缩略图第一眼看到的必须是商品，不是装饰）。" +
-    "氛围元素必须与商品用途或使用场景相关（桌面、床头、妆台、随身包、衣饰，" +
-    "或与节庆匹配的装饰），禁止用水果、食物、香料、餐具等无关静物凑画面，也不要堆砌装饰物。" +
-    "参考图只提供光影方向、色温、虚实关系和氛围情绪，参考图里的旧商品、旧包装、" +
-    "背景杂物和人物一律不得出现在结果里，也不要把参考图的旧商品位置当成必须复刻的构图。" +
-    "商品保真优先于氛围表现：氛围与商品冲突时削弱氛围，不改商品",
 };
 
 /**
@@ -386,13 +357,47 @@ const BUYER_SHOW_PERSON_REF =
   "严格还原其人物特征，不要自行发挥";
 
 /**
+ * 主图「带卖点文字」开关（QQ1000 include_main_selling_points 口径）。
+ *
+ * 返回两段要注入 prompt 的指令：
+ * - selling_points_directive：本张要不要把卖点写进画面
+ * - copy_directive_override：仅在“关了卖点且用户又没写文案”时非空，
+ *   用于覆盖 applyCopyPriority 给出的“基于卖点信息自动生成图片文案”——
+ *   否则“不直接生成卖点文字”与“自动生成文案”两句会同时进 prompt 打架。
+ *
+ * 注意：开关只管“卖点标签/卖点文案”；用户在“图片文案”里
+ * 手写的文案仍然照写（用户明确要的字不该被开关静默吞掉）。
+ */
+export function buildSellingPointsContext(values: FormValues): {
+  selling_points_directive: string;
+  copy_directive_override?: string;
+} {
+  const info = String(values.info ?? "").trim();
+  const userCopy = String(values.copy ?? "").trim();
+  const include = values.include_selling_points !== false;
+
+  if (include) {
+    return {
+      selling_points_directive: `主图需要呈现卖点，卖点/参数：${
+        info || "根据商品图提炼真实卖点、材质、功能和购买理由"
+      }`,
+    };
+  }
+  return {
+    selling_points_directive:
+      "主图不直接生成卖点文字，只保留干净信息区或留白，不要绘制卖点标签",
+    ...(userCopy ? {} : { copy_directive_override: "不要在图上写任何文字，只保留干净留白" }),
+  };
+}
+
+/**
  * 生成单张图的差异化指令。
  *
  * @param role      该张图的角色定义；无定义时返回空串
  * @param total     本批次总张数，用于告知模型"这是第 N 张、共 M 张"
  * @param opts      hasPersonRef: 是否上传了参考人物图（买家秀用）
- *                  siblings: 本批次实际会生成的角色清单，用于告诉模型
- *                  “同组其它张分别占用了哪些画面骨架”，它才知道要避开什么
+ *                  siblings: 本批次实际会生成的角色清单，仅有详页在用
+ *                  （画面骨架避让；主图已改为靠位次意图天然区分）
  */
 export function buildOutputDirective(
   role: OutputRoleInfo | undefined,
@@ -404,6 +409,24 @@ export function buildOutputDirective(
   // 买家秀（variant_* 是它的兜底 role 名）要的是人物一致、机位有别，
   // 与其它应用"内容要有区分"的诉求相反，单独走一套约束
   const isBuyerShow = role.outputRole.startsWith("variant_");
+
+  // ---- 主图（QQ1000 套图口径）：只给张次 + 一句位次意图 ----
+  //
+  // 对齐上游 E:/Workspace/qq1000-reference（listing-bundle）的 prompt 密度：
+  // 上游每张只有“套图一键生成：当前只生成第 N 张主图，整套共有…”+ 一句位次意图，
+  // 而上一版我们每张 701-1020 字，出图反而越差（对比图/氛围图为典型）。
+  // 位次意图本身就互斥（白底/场景/促销/高端/细节/痛点/氛围/礼盒/平台），
+  // 再叠骨架清单、兄弟图清单、多 SKU 规则只会稀释指令、互相打架。
+  if (role.outputRole.startsWith(MAIN_IMAGE_ROLE_PREFIX)) {
+    const lines: string[] = [];
+    if (total > 1) {
+      // 上游写法：“当前只生成第 N 张，整套共有 M 张”
+      // 让模型知道自己在整组里的位置，不要一次画成套图拼贴
+      lines.push(`本次共 ${total} 张成组输出，当前只生成第 ${role.outputIndex} 张。`);
+    }
+    if (role.description) lines.push(role.description);
+    return lines.join("\n");
+  }
 
   const parts: string[] = [];
   // 让模型知道自己在整组里的位置，是形成脉络（而非各画各的）的前提

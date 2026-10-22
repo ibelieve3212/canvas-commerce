@@ -15,7 +15,7 @@ export interface ProviderReferenceImage {
   buffer: Buffer;
   mimeType: string;
   /** 参考图角色：商品图/风格图/人物图/品牌图 */
-  role: "product" | "style" | "person" | "brand" | "compare";
+  role: "product" | "style" | "person" | "brand";
   /** 原始上传 ID（用于溯源） */
   uploadId?: string;
 }

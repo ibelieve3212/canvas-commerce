@@ -155,9 +155,14 @@ export function GeneratorClient({ app }: { app: Application }) {
     }
     return n;
   }, [isPerImage, app.formSchema, values]);
+  const isRolesMode = app.outputConfig?.mode === "roles";
+  // roles 模式的字段默认不勾任何类型（10 类全平铺，由用户自己挑），
+  // 此时不能提交：服务端对空勾选会退化成“取前 N 个”并真的生成 1 张，
+  // 用户没选却出图会很困惑。所以空勾选在 UI 层就拦住。
+  const rolesEmpty = isRolesMode && selectedRoleCount === 0;
   const effectiveRequestedCount = isPerImage
     ? Math.max(1, perImageCount)
-    : app.outputConfig?.mode === "roles"
+    : isRolesMode
       // roles 模式：勾了哪几种就生成几张（服务端会按勾选过滤角色）
       ? Math.max(1, selectedRoleCount)
       : requestedCount;
@@ -284,6 +289,10 @@ export function GeneratorClient({ app }: { app: Application }) {
   }, [batchId, app]);
 
   const handleSubmit = async () => {
+    if (rolesEmpty) {
+      setSubmitError("请先勾选要生成的主图类型（至少一种）");
+      return;
+    }
     const result = validateFormValues(app.formSchema, values);
     if (!result.ok) {
       setErrors(result.errors);
@@ -320,7 +329,7 @@ export function GeneratorClient({ app }: { app: Application }) {
       const idempotencyKey = `${app.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
       // 从 formValues 中的 image 字段收集 referenceImages
-      const referenceImages: { uploadId: string; role: "product" | "style" | "person" | "brand" | "compare" }[] = [];
+      const referenceImages: { uploadId: string; role: "product" | "style" | "person" | "brand" }[] = [];
       for (const f of app.formSchema) {
         if (f.type === "image") {
           const val = values[f.key];
@@ -329,7 +338,7 @@ export function GeneratorClient({ app }: { app: Application }) {
               if (item.uploadId) {
                 referenceImages.push({
                   uploadId: item.uploadId,
-                  role: (f.roles?.[0] ?? "product") as "product" | "style" | "person" | "brand" | "compare",
+                  role: (f.roles?.[0] ?? "product") as "product" | "style" | "person" | "brand",
                 });
               }
             }
@@ -443,7 +452,9 @@ export function GeneratorClient({ app }: { app: Application }) {
                 ? perImageCount > 0
                   ? `开始处理（${perImageCount} 张）`
                   : "上传图片后开始"
-                : `生成 ${effectiveRequestedCount} 张${app.name}`}
+                : rolesEmpty
+                  ? "请勾选主图类型"
+                  : `生成 ${effectiveRequestedCount} 张${app.name}`}
             </Button>
             {firstErrorKey && errors[firstErrorKey] && (
               <p className="mt-2 text-xs text-[var(--color-danger)]" role="alert">
