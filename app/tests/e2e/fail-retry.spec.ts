@@ -43,9 +43,11 @@ test.describe("ACCEPTANCE 故障注入与重试", () => {
     await page.waitForURL("**/apps");
 
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("__FAIL__测试");
     await page.getByLabel("类目").fill("服饰");
-    // 填商品信息，否则会弹"这批图不会带任何文案"确认框（该行为在 generator.spec.ts 里测）
+    // 填商品信息，否则会弹"图上文案将由 AI 自行提炼"确认框（该行为在 generator.spec.ts 里测）
     await page.getByLabel("商品信息").fill("测试信息");
 
     // 上传商品图
@@ -60,7 +62,6 @@ test.describe("ACCEPTANCE 故障注入与重试", () => {
     });
     await expect(page.getByAltText("素材 1")).toBeVisible({ timeout: 10000 });
 
-    await page.getByRole("button", { name: "1 张", exact: true }).click();
     await page.getByRole("button", { name: /生成.*张/ }).click();
 
     await expect(page.getByText(/完成 \d\/\d/).first()).toBeVisible({ timeout: 8000 });

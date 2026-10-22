@@ -41,9 +41,11 @@ test.beforeEach(async ({ page }) => {
 test.describe("阶段3 导出", () => {
   test("单张下载，文件名含应用 slug", async ({ page }) => {
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("导出测试");
     await page.getByLabel("类目").fill("数码");
-    // 填商品信息，否则会弹"这批图不会带任何文案"确认框（该行为在 generator.spec.ts 里测）
+    // 填商品信息，否则会弹"图上文案将由 AI 自行提炼"确认框（该行为在 generator.spec.ts 里测）
     await page.getByLabel("商品信息").fill("音质好、续航长");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
       name: "t.png", mimeType: "image/png", buffer: VALID_PNG,

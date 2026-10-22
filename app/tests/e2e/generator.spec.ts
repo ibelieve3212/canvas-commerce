@@ -76,12 +76,15 @@ test.describe("阶段2 生成器", () => {
 
   test("商品主图生成 1 张", async ({ page }) => {
     await page.goto("/apps/main-image");
-    await expect(page.getByRole("button", { name: /生成 1 张/ })).toBeVisible();
+    // roles 模式：位次默认一个都不勾，按钮文案会拦住空提交
+    await expect(page.getByRole("button", { name: "请勾选主图类型" })).toBeVisible();
+    await page.getByRole("button", { name: "高点击首图" }).click();
+    await expect(page.getByRole("button", { name: /生成 1 张商品主图/ })).toBeVisible();
 
     await page.getByLabel("商品名").fill("测试商品");
     await page.getByLabel("类目").fill("数码");
-    // 填商品信息才不会触发"这批图不会带任何文案"确认框。
-    // 该确认框自己的行为在下面两个用例里测。
+    // 填商品信息才不会触发"图上文案将由 AI 自行提炼"确认框。
+    // 该确认框自己的行为在下面几个用例里测。
     await page.getByLabel("商品信息").fill("音质好、续航长");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
       name: "t.png",
@@ -91,8 +94,7 @@ test.describe("阶段2 生成器", () => {
     // 等待上传完成
     await expect(page.getByAltText("素材 1")).toBeVisible({ timeout: 10000 });
 
-    await page.getByRole("button", { name: /生成 1 张/ }).click();
-    await expect(page.getByText("吸睛主图")).toBeVisible({ timeout: 10000 });
+    await page.getByRole("button", { name: /生成 1 张商品主图/ }).click();
     await expect(page.getByText("完成 1/1")).toBeVisible({ timeout: 60000 });
   });
 
@@ -105,13 +107,16 @@ test.describe("阶段2 生成器", () => {
 });
 
 /**
- * 三个文案来源全空时，prompt 里写死"不要在图上写任何文字"，出的是纯无字图。
- * 这是设计如此，但界面上此前毫无预告——用户以为生成失败又白跑一整批
- * （一张 45-95 秒，五张就是八分钟）。所以提交前拦一次。
+ * 主图的"带卖点文字"开关（勾选即为默认）：
+ * - 勾了但「商品信息」留空 → 图上文字由模型自己提炼，可能写出商品图上看不清的卖点
+ * - 取消勾选 → 出的是不带任何文字的纯图
+ * 两种都不是错误，但用户看不到结果就得白跑一整批（一张 45-95 秒），
+ * 所以提交前各拦一次——弹窗里的措辞就是用户能看到的全部信息，逐字断言。
  */
-test.describe("无文案确认", () => {
-  test("主图三个文案字段全空时，点生成先弹确认而不是直接开跑", async ({ page }) => {
+test.describe("主图卖点文字确认", () => {
+  test("勾选卖点文字但没填商品信息时，点生成先弹确认而不是直接开跑", async ({ page }) => {
     await page.goto("/apps/main-image");
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("无文案测试");
     await page.getByLabel("类目").fill("数码");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
@@ -119,10 +124,10 @@ test.describe("无文案确认", () => {
     });
     await expect(page.getByAltText("素材 1")).toBeVisible({ timeout: 10000 });
 
-    await page.getByRole("button", { name: /生成 1 张/ }).click();
+    await page.getByRole("button", { name: /生成 1 张商品主图/ }).click();
 
     await expect(page.getByRole("alertdialog")).toBeVisible();
-    await expect(page.getByText("这批图不会带任何文案")).toBeVisible();
+    await expect(page.getByText("图上文案将由 AI 自行提炼")).toBeVisible();
     // 提示要点名该应用真实存在的字段，说错名字用户会去找不存在的输入框
     await expect(page.getByRole("alertdialog")).toContainText("商品信息");
 
@@ -134,6 +139,7 @@ test.describe("无文案确认", () => {
 
   test("确认后照常生成", async ({ page }) => {
     await page.goto("/apps/main-image");
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("确认后生成");
     await page.getByLabel("类目").fill("数码");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
@@ -141,15 +147,34 @@ test.describe("无文案确认", () => {
     });
     await expect(page.getByAltText("素材 1")).toBeVisible({ timeout: 10000 });
 
-    await page.getByRole("button", { name: /生成 1 张/ }).click();
-    await page.getByRole("button", { name: "就要无文案的图" }).click();
+    await page.getByRole("button", { name: /生成 1 张商品主图/ }).click();
+    await page.getByRole("button", { name: "让 AI 自己写" }).click();
 
     await expect(page.getByRole("alertdialog")).toBeHidden();
     await expect(page.getByText("完成 1/1")).toBeVisible({ timeout: 60000 });
   });
 
+  test("取消勾选卖点文字时，提醒这批图不带任何文字", async ({ page }) => {
+    await page.goto("/apps/main-image");
+    await page.getByRole("button", { name: "高点击首图" }).click();
+    await page.getByLabel("商品名").fill("无字纯图");
+    await page.getByLabel("类目").fill("数码");
+    await page.getByLabel("主图带卖点文字").uncheck();
+    await page.locator('input[type="file"]').nth(1).setInputFiles({
+      name: "t.png", mimeType: "image/png", buffer: VALID_PNG,
+    });
+    await expect(page.getByAltText("素材 1")).toBeVisible({ timeout: 10000 });
+
+    await page.getByRole("button", { name: /生成 1 张商品主图/ }).click();
+
+    await expect(page.getByText("生成的会是不带文字的纯图片")).toBeVisible();
+    await page.getByRole("button", { name: "就要无文案的图" }).click();
+    await expect(page.getByText("完成 1/1")).toBeVisible({ timeout: 60000 });
+  });
+
   test("填了商品信息就不再拦", async ({ page }) => {
     await page.goto("/apps/main-image");
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("有文案");
     await page.getByLabel("类目").fill("数码");
     await page.getByLabel("商品信息").fill("音质好、续航长");
@@ -158,7 +183,7 @@ test.describe("无文案确认", () => {
     });
     await expect(page.getByAltText("素材 1")).toBeVisible({ timeout: 10000 });
 
-    await page.getByRole("button", { name: /生成 1 张/ }).click();
+    await page.getByRole("button", { name: /生成 1 张商品主图/ }).click();
     await expect(page.getByRole("alertdialog")).toBeHidden();
     await expect(page.getByText(/完成 \d\/1/)).toBeVisible({ timeout: 15000 });
   });

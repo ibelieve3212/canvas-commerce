@@ -40,10 +40,23 @@ describe("builtin applications contract", () => {
     expect(detail.outputRoles.map((r) => r.outputIndex)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
-  it("主图输出可选 1/3/5，定义 5 个角色", () => {
+  it("主图按位次勾选生成，定义 10 个位次角色", () => {
     const main = builtinApplications.find((a) => a.slug === "main-image")!;
-    expect(main.outputConfig).toEqual({ mode: "selectable", options: [1, 3, 5] });
-    expect(main.outputRoles).toHaveLength(5);
+    // QQ1000 口径：10 个位次对齐上游套图分工，用户勾几种生成几张
+    expect(main.outputConfig).toEqual({ mode: "roles" });
+    expect(main.outputRoles).toHaveLength(10);
+    expect(main.outputRoles.map((r) => r.outputRole)).toEqual([
+      "main_hot_click",
+      "main_white_bg",
+      "main_scene",
+      "main_promotion",
+      "main_premium",
+      "main_detail_point",
+      "main_pain_point",
+      "main_mood",
+      "main_gift",
+      "main_platform",
+    ]);
   });
 
   it("买家秀可选 1/2/4，海报可选 1/2/4/6", () => {

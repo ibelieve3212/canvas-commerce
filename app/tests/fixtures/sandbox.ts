@@ -26,6 +26,30 @@ export interface Sandbox {
 }
 
 /**
+ * 把沙箱库里的生图渠道配置清空，强制走 mock provider。
+ *
+ * 为什么需要：provider 选择优先读 DB（用户级 > 管理员默认 > env，
+ * 见 getUserProviderConfig），本地 dev.db 里通常配着真实渠道，而沙箱是
+ * 它的副本——于是单测会真的去打外部 API，表现为 5s 超时、还烧额度。
+ * GENERATION_PROVIDER=mock 对这条路径无效（它只在 getProvider() 里用）。
+ *
+ * 参数用最小结构类型，避免这里 import prisma（那会在环境变量就绪前加载 env）。
+ */
+export async function forceMockProvider(db: {
+  user: { updateMany: (args: { data: Record<string, unknown> }) => Promise<unknown> };
+  systemSetting: {
+    deleteMany: (args: { where: { key: { in: string[] } } }) => Promise<unknown>;
+  };
+}): Promise<void> {
+  await db.user.updateMany({
+    data: { providerBaseUrl: null, providerApiKey: null, useGlobalProvider: true },
+  });
+  await db.systemSetting.deleteMany({
+    where: { key: { in: ["provider_base_url", "provider_api_key", "provider_model"] } },
+  });
+}
+
+/**
  * 拷一份 dev.db（含 WAL）到临时目录。
  *
  * @param copyStorage true 则连 storage 一起拷（需要断言文件存在的用例）；

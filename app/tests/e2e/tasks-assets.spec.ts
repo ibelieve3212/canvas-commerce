@@ -41,9 +41,11 @@ test.beforeEach(async ({ page }) => {
 test.describe("阶段4 任务和资产", () => {
   test("生成后任务中心显示批次", async ({ page }) => {
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("任务测试");
     await page.getByLabel("类目").fill("数码");
-    // 填商品信息，否则会弹"这批图不会带任何文案"确认框（该行为在 generator.spec.ts 里测）
+    // 填商品信息，否则会弹"图上文案将由 AI 自行提炼"确认框（该行为在 generator.spec.ts 里测）
     await page.getByLabel("商品信息").fill("音质好、续航长");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
       name: "t.png", mimeType: "image/png", buffer: VALID_PNG,
@@ -59,9 +61,11 @@ test.describe("阶段4 任务和资产", () => {
 
   test("生成后资产库显示图片", async ({ page }) => {
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("资产测试");
     await page.getByLabel("类目").fill("数码");
-    // 填商品信息，否则会弹"这批图不会带任何文案"确认框（该行为在 generator.spec.ts 里测）
+    // 填商品信息，否则会弹"图上文案将由 AI 自行提炼"确认框（该行为在 generator.spec.ts 里测）
     await page.getByLabel("商品信息").fill("音质好、续航长");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
       name: "t.png", mimeType: "image/png", buffer: VALID_PNG,
@@ -76,9 +80,11 @@ test.describe("阶段4 任务和资产", () => {
 
   test("资产库收藏后刷新保持", async ({ page }) => {
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("收藏测试");
     await page.getByLabel("类目").fill("数码");
-    // 填商品信息，否则会弹"这批图不会带任何文案"确认框（该行为在 generator.spec.ts 里测）
+    // 填商品信息，否则会弹"图上文案将由 AI 自行提炼"确认框（该行为在 generator.spec.ts 里测）
     await page.getByLabel("商品信息").fill("音质好、续航长");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
       name: "t.png", mimeType: "image/png", buffer: VALID_PNG,
@@ -98,9 +104,11 @@ test.describe("阶段4 任务和资产", () => {
 
   test("可彻底删除任务", async ({ page }) => {
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("删除测试");
     await page.getByLabel("类目").fill("数码");
-    // 填商品信息，否则会弹"这批图不会带任何文案"确认框（该行为在 generator.spec.ts 里测）
+    // 填商品信息，否则会弹"图上文案将由 AI 自行提炼"确认框（该行为在 generator.spec.ts 里测）
     await page.getByLabel("商品信息").fill("音质好、续航长");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
       name: "t.png", mimeType: "image/png", buffer: VALID_PNG,
@@ -154,9 +162,11 @@ test.describe("阶段4 任务和资产", () => {
 
   test("可恢复配置到生成器", async ({ page }) => {
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("版本A");
     await page.getByLabel("类目").fill("数码");
-    // 填商品信息，否则会弹"这批图不会带任何文案"确认框（该行为在 generator.spec.ts 里测）
+    // 填商品信息，否则会弹"图上文案将由 AI 自行提炼"确认框（该行为在 generator.spec.ts 里测）
     await page.getByLabel("商品信息").fill("音质好、续航长");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
       name: "t.png", mimeType: "image/png", buffer: VALID_PNG,

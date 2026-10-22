@@ -18,7 +18,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { runMigrations } from "../../scripts/migrate.mjs";
-import { createSandbox, hasFixture } from "../fixtures/sandbox";
+import { createSandbox, hasFixture, forceMockProvider } from "../fixtures/sandbox";
 
 import { ApplicationSchema, isAspectRatio, nearestAspectRatio, type FormSchema } from "@/contracts/application";
 import { validateFormValues, applySliderLevels, applyCopyPriority, composePrompt } from "@/contracts/generation";
@@ -228,6 +228,9 @@ beforeAll(async () => {
   process.env.GENERATION_PROVIDER = "mock";
 
   prisma = (await import("@/server/db/client")).prisma;
+  // 沙箱库是从 dev.db 拷的，里面存着真实生图渠道配置，
+  // 不清掉 processJob 会真的去打外部 API（见 forceMockProvider）
+  await forceMockProvider(prisma);
   service = await import("@/server/generation/service");
 
   // 沙箱库是从 dev.db 拷的，可能还没种过三个工具应用。

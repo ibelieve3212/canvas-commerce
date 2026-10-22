@@ -12,6 +12,7 @@ import {
   applyCopyPriority,
   buildOutputDirective,
   buildPointDirective,
+  buildSellingPointsContext,
   type OutputRoleInfo,
 } from "@/contracts/generation";
 import { detailPageApp } from "@/server/applications/apps/detail-page";
@@ -37,7 +38,13 @@ function buildPrompts(
           description: app.kind === "POSTER" ? "围绕分配到的单个卖点做画面主体" : "",
         }));
 
-  const withCopy = applyCopyPriority(values);
+  // 与 service.ts createBatch 同步：主图模板吃 selling_points_directive，
+  // 且「主图带卖点文字」开关会覆盖 applyCopyPriority 注入的 copy_directive
+  const spCtx = buildSellingPointsContext(values);
+  const usesSellingPointsDirective = app.promptTemplate.includes("{{selling_points_directive}}");
+  const withCopy = usesSellingPointsDirective && spCtx.copy_directive_override
+    ? { ...applyCopyPriority(values), copy_directive: spCtx.copy_directive_override }
+    : applyCopyPriority(values);
   return roles.map((role) =>
     composePrompt(
       app.promptTemplate,
@@ -45,6 +52,7 @@ function buildPrompts(
         ...withCopy,
         output_directive: buildOutputDirective(role, roles.length, opts),
         point_directive: buildPointDirective(withCopy, role, roles.length),
+        selling_points_directive: spCtx.selling_points_directive,
       },
       [],
     ),
@@ -84,12 +92,14 @@ describe("多图脉络", () => {
     for (const p of prompts) expect(p).toContain("严格只做本张的定位");
   });
 
-  it("主图选 3 张拿到吸睛/场景/卖点三种不同定位", () => {
+  it("主图选 3 张拿到高点击/白底/场景三种不同定位", () => {
     const prompts = buildPrompts(mainImageApp, { name: "音箱", category: "数码" }, 3);
     expect(new Set(prompts).size).toBe(3);
-    expect(prompts[0]).toContain("吸睛主图");
-    expect(prompts[1]).toContain("场景主图");
-    expect(prompts[2]).toContain("卖点主图");
+    // 主图走 QQ1000 轻量口径：只给张次 + 一句位次意图（description），
+    // 不拼 title、不拼骨架清单
+    expect(prompts[0]).toContain("高点击首图：主体大、卖点集中");
+    expect(prompts[1]).toContain("白底质感主图：纯净白底");
+    expect(prompts[2]).toContain("场景主图：把商品放入真实使用场景");
   });
 
   it("主图模板不再写死'吸睛'，否则会盖过其它张的定位", () => {
@@ -120,7 +130,8 @@ describe("多图脉络", () => {
   it("单张生成不出现'第 N 张/共 M 张'的成组措辞", () => {
     const [prompt] = buildPrompts(mainImageApp, { name: "音箱", category: "数码" }, 1);
     expect(prompt).not.toContain("共 1 张");
-    expect(prompt).toContain("本张定位");
+    // 单张时仍要带位次意图，否则模型不知道这张要做什么
+    expect(prompt).toContain("高点击首图：主体大");
   });
 
   describe("同款参考版式（reference_layout）", () => {
@@ -129,7 +140,14 @@ describe("多图脉络", () => {
     // "整张照着参考图做"，与"这张要做真人使用场景"的角色约束直接对撞；
     // 加上它在 prompt 中部、角色约束在结尾，靠后的赢了。
     // 现在改为只继承视觉基调、画面内容仍按本张定位，两者不再互斥。
-    const values = { name: "香水", category: "美妆/香水", reference_layout: true };
+    // 新字段 reference_rule（三档 select）取代旧的 reference_layout 勾选框，
+    // 从 formSchema 取选项值，避免测试里硬编码长指令文本
+    const ruleField = mainImageApp.formSchema.find((f) => f.key === "reference_rule");
+    const RULE_STRICT =
+      ruleField?.type === "select"
+        ? (ruleField.options.find((o) => o.label === "严格复刻参考图版式")?.value ?? "")
+        : "";
+    const values = { name: "香水", category: "美妆/香水", reference_rule: RULE_STRICT };
 
     it("勾选后每一张都带版式指令，不只第一张", () => {
       const prompts = buildPrompts(mainImageApp, values, 3);
@@ -140,27 +158,30 @@ describe("多图脉络", () => {
 
     it("版式指令与角色定位共存，不是二选一", () => {
       const prompts = buildPrompts(mainImageApp, values, 3);
-      // 第 2 张：既要做场景图，又要沿用参考图色调
-      expect(prompts[1]).toContain("场景主图");
+      // 第 2 张：既要做白底质感图，又要沿用参考图版式
+      expect(prompts[1]).toContain("白底质感主图：纯净白底");
       expect(prompts[1]).toContain("视觉基调");
       // 明确只继承基调，不复制参考图的主体——否则模型会把参考图的人和道具搬过来
-      expect(prompts[1]).toContain("不要复制参考图里的具体主体");
-      expect(prompts[1]).toContain("画面内容与构图仍按本张定位执行");
+      expect(prompts[1]).toContain("参考图里的商品、人物、Logo、文字不能照搬为主体");
     });
 
     it("版式指令紧跟角色约束，不再隔一大段被压过", () => {
       const [prompt] = buildPrompts(mainImageApp, values, 3);
       // 位置关系是这次修复的关键：原来版式在中部、角色在结尾，
-      // 模型更重视靠后的指令，于是版式被丢掉
-      expect(prompt.indexOf("视觉基调")).toBeGreaterThan(prompt.indexOf("这是第 1 张"));
+      // 模型更重视靠后的指令，于是版式被丢掉。
+      // 主图走 QQ1000 轻量口径，位次意图在 {{output_directive}}，
+      // 版式指令（{{reference_rule}}）必须排在它后面
+      expect(prompt.indexOf("视觉基调")).toBeGreaterThan(prompt.indexOf("高点击首图：主体大"));
     });
 
-    it("未勾选时不出现版式指令，风格选择正常保留", () => {
-      const prompts = buildPrompts(mainImageApp, { name: "香水", category: "美妆/香水", style: "premium" }, 3);
+    it("未选参考图用法时不出现版式指令，风格选择正常保留", () => {
+      // style 的 value 是完整指令文本（composePrompt 只做简单替换）
+      const styleValue = "高端质感：克制构图、低饱和配色、方向明确的高光与暗部、强调材质与做工细节";
+      const prompts = buildPrompts(mainImageApp, { name: "香水", category: "美妆/香水", style: styleValue }, 3);
       for (const p of prompts) {
         expect(p).not.toContain("视觉基调");
         expect(p).not.toContain("风格/版式参考图");
-        expect(p).toContain("风格 premium");
+        expect(p).toContain("高端质感：克制构图");
       }
     });
 
@@ -282,8 +303,7 @@ describe("多图脉络", () => {
       // 场景图把 T 型结构画成了扁圆形、只有卖点图接近原图。
       const prompts = buildPrompts(mainImageApp, { name: "坐垫", category: "养生" }, 3);
       for (const [i, p] of prompts.entries()) {
-        expect(p, `主图第 ${i + 1} 张缺少保真约束`).toContain("与商品图完全一致");
-        expect(p).toContain("不要重新设计商品");
+        expect(p, `主图第 ${i + 1} 张缺少保真约束`).toContain("严格保留商品的外观、形状、颜色、材质");
       }
     });
 

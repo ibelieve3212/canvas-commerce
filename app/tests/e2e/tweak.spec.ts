@@ -41,9 +41,11 @@ test.beforeEach(async ({ page }) => {
 test.describe("OPT-1 微调", () => {
   test("商品主图生成后可微调，生成微调版本", async ({ page }) => {
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("测试商品");
     await page.getByLabel("类目").fill("数码");
-    // 填商品信息，否则会弹"这批图不会带任何文案"确认框（该行为在 generator.spec.ts 里测）
+    // 填商品信息，否则会弹"图上文案将由 AI 自行提炼"确认框（该行为在 generator.spec.ts 里测）
     await page.getByLabel("商品信息").fill("音质好、续航长");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
       name: "t.png", mimeType: "image/png", buffer: VALID_PNG,
@@ -73,21 +75,20 @@ test.describe("OPT-1 微调", () => {
     await expect(page.getByText("微调版本")).toBeVisible({ timeout: 10000 });
   });
 
-  test("商品主图支持 1/3/5 张数量选择", async ({ page }) => {
+  // 主图改成 roles 模式后不再有 1/3/5 数量选择器：勾哪几个位次就生成哪几张
+  test("商品主图按位次勾选决定张数", async ({ page }) => {
     await page.goto("/apps/main-image");
 
-    // 默认 1 张
-    await expect(page.getByText("生成数量")).toBeVisible();
-    await expect(page.getByRole("button", { name: "1 张", exact: true })).toBeVisible();
+    // 位次默认一个都不勾，按钮文案拦住空提交
+    await expect(page.getByRole("button", { name: "请勾选主图类型" })).toBeVisible();
 
-    // 切换到 3 张
-    const threeBtn = page.locator("button").filter({ hasText: /^3 张$/ });
-    await threeBtn.click();
-    await expect(page.getByRole("button", { name: /生成 3 张/ })).toBeVisible();
+    // 勾 2 个位次 → 按钮跟着变 2 张
+    await page.getByRole("button", { name: "高点击首图" }).click();
+    await page.getByRole("button", { name: "场景主图" }).click();
+    await expect(page.getByRole("button", { name: /生成 2 张商品主图/ })).toBeVisible();
 
-    // 切换到 5 张
-    const fiveBtn = page.locator("button").filter({ hasText: /^5 张$/ });
-    await fiveBtn.click();
-    await expect(page.getByRole("button", { name: /生成 5 张/ })).toBeVisible();
+    // 再取消一个 → 回到 1 张
+    await page.getByRole("button", { name: "场景主图" }).click();
+    await expect(page.getByRole("button", { name: /生成 1 张商品主图/ })).toBeVisible();
   });
 });

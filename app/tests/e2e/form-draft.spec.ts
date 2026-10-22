@@ -46,6 +46,8 @@ test.describe("表单草稿暂存", () => {
 
   test("切到聊天页再回来，填写内容与提示都在", async ({ page }) => {
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("T型艾草蒲团");
     await page.getByLabel("类目").fill("养生");
 
@@ -53,6 +55,8 @@ test.describe("表单草稿暂存", () => {
     await page.goto("/chat");
     await expect(page).toHaveURL(/\/chat/);
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
 
     await expect(page.getByLabel("商品名")).toHaveValue("T型艾草蒲团");
     await expect(page.getByLabel("类目")).toHaveValue("养生");
@@ -61,6 +65,8 @@ test.describe("表单草稿暂存", () => {
 
   test("刷新页面同样保留", async ({ page }) => {
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("刷新测试");
     await page.reload();
     await expect(page.getByLabel("商品名")).toHaveValue("刷新测试");
@@ -68,9 +74,11 @@ test.describe("表单草稿暂存", () => {
 
   test("提交后草稿清空，下次进来是空表单", async ({ page }) => {
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("提交后应清空");
     await page.getByLabel("类目").fill("数码");
-    // 填商品信息，否则会弹"这批图不会带任何文案"确认框（该行为在 generator.spec.ts 里测）
+    // 填商品信息，否则会弹"图上文案将由 AI 自行提炼"确认框（该行为在 generator.spec.ts 里测）
     await page.getByLabel("商品信息").fill("音质好、续航长");
     await page.locator('input[type="file"]').nth(1).setInputFiles({
       name: "t.png",
@@ -84,12 +92,16 @@ test.describe("表单草稿暂存", () => {
 
     // 重新进入：草稿应已被清掉
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await expect(page.getByLabel("商品名")).toHaveValue("");
     await expect(page.getByText(/已恢复.*未提交的填写内容/)).toBeHidden();
   });
 
   test("不同应用的草稿互不干扰", async ({ page }) => {
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await page.getByLabel("商品名").fill("主图的内容");
 
     await page.goto("/apps/detail-page");
@@ -97,6 +109,8 @@ test.describe("表单草稿暂存", () => {
     await page.getByLabel("商品名").fill("详情页的内容");
 
     await page.goto("/apps/main-image");
+    // roles 模式：先勾一个位次，否则按钮是「请勾选主图类型」
+    await page.getByRole("button", { name: "高点击首图" }).click();
     await expect(page.getByLabel("商品名")).toHaveValue("主图的内容");
   });
 });
