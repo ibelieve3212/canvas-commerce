@@ -171,21 +171,54 @@ export class CcloadProvider implements ImageGenerationProvider {
       throw classifyError(response.status, json);
     }
 
-    if (!json?.data?.[0]?.b64_json) {
-      throw new ProviderError(
-        "UNKNOWN",
-        "响应中缺少 b64_json 字段",
-        false,
-      );
-    }
-
-    // Base64 解码
-    const raw = json.data[0].b64_json as string;
+    // 实测（2026-10）：gpt-image-2 渠道存在两种响应模式，且会随上游状态来回切换——
+    // a) data[0].b64_json（标准 OpenAI 格式）
+    // b) 仅 data[0].url：上游把生成图转存至自有图床后只回传下载链接。
+    // 两种模式都按成功处理：优先 b64_json；缺失时下载 url。
+    // 下载结果仍走下方签名验证，不信任 Content-Type。
     let imageBuffer: Buffer;
-    try {
-      imageBuffer = Buffer.from(raw, "base64");
-    } catch {
-      throw new ProviderError("UNKNOWN", "b64_json 解码失败", false);
+
+    if (json?.data?.[0]?.b64_json) {
+      const raw = json.data[0].b64_json as string;
+      try {
+        imageBuffer = Buffer.from(raw, "base64");
+      } catch {
+        throw new ProviderError("UNKNOWN", "b64_json 解码失败", false);
+      }
+    } else {
+      const imageUrl = json?.data?.[0]?.url;
+      if (typeof imageUrl !== "string" || imageUrl.length === 0) {
+        // json 为 null 说明 200 但响应不是合法 JSON（网关伪成功/错误页），值得重试；
+        // JSON 合法但两个字段都缺才是真正的未知格式，不重试。
+        throw new ProviderError(
+          "UNKNOWN",
+          json === null
+            ? "上游响应不是合法 JSON（可能为网关错误页）"
+            : "响应中缺少 b64_json 与 url 字段",
+          json === null,
+        );
+      }
+      try {
+        const imageResp = await fetch(imageUrl, { signal });
+        if (!imageResp.ok) {
+          throw new ProviderError(
+            "PROVIDER_UNAVAILABLE",
+            `图片 URL 下载失败: HTTP ${imageResp.status}`,
+            true,
+          );
+        }
+        imageBuffer = Buffer.from(await imageResp.arrayBuffer());
+      } catch (err) {
+        if (err instanceof ProviderError) throw err;
+        if (err instanceof Error && err.name === "AbortError") {
+          throw new ProviderError("PROVIDER_TIMEOUT", "请求被取消", true);
+        }
+        throw new ProviderError(
+          "PROVIDER_UNAVAILABLE",
+          `图片 URL 下载失败: ${err instanceof Error ? err.message : String(err)}`,
+          true,
+        );
+      }
     }
 
     // 验证 PNG 签名

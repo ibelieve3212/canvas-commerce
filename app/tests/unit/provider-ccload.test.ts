@@ -111,16 +111,55 @@ describe("CcloadProvider", () => {
     })).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE", retryable: true });
   });
 
-  it("缺少 b64_json 时抛出 UNKNOWN", async () => {
+  it("缺 b64_json 但有 url → 下载 url 作为图片来源", async () => {
+    const png = makePngBuffer();
     mockFetch.mockResolvedValueOnce({
       ok: true, status: 200, headers: new Headers(),
       json: async () => ({ data: [{ url: "https://example.com/img.png" }] }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200, headers: new Headers(),
+      arrayBuffer: async () => new Uint8Array(png).buffer,
+    });
+
+    const result = await provider.generate({
+      prompt: "test", aspectRatio: "1:1", outputFormat: "png",
+      referenceImages: [], metadata: { batchId: "b1", jobId: "j1", outputRole: "hero" },
+    });
+
+    expect(result.imageBuffer.length).toBe(png.length);
+    expect(result.mimeType).toBe("image/png");
+    expect(result.width).toBe(64);
+    expect(result.height).toBe(64);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[1][0]).toBe("https://example.com/img.png");
+  });
+
+  it("既无 b64_json 也无 url → UNKNOWN 不可重试", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200, headers: new Headers(),
+      json: async () => ({ data: [{}] }),
     });
 
     await expect(provider.generate({
       prompt: "test", aspectRatio: "1:1", outputFormat: "png",
       referenceImages: [], metadata: { batchId: "b1", jobId: "j1", outputRole: "hero" },
     })).rejects.toMatchObject({ code: "UNKNOWN", retryable: false });
+  });
+
+  it("url 下载失败 → PROVIDER_UNAVAILABLE 可重试", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true, status: 200, headers: new Headers(),
+      json: async () => ({ data: [{ url: "https://example.com/img.png" }] }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: false, status: 502, headers: new Headers(),
+    });
+
+    await expect(provider.generate({
+      prompt: "test", aspectRatio: "1:1", outputFormat: "png",
+      referenceImages: [], metadata: { batchId: "b1", jobId: "j1", outputRole: "hero" },
+    })).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE", retryable: true });
   });
 
   it("网络错误标记为 PROVIDER_UNAVAILABLE + retryable", async () => {

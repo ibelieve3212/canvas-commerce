@@ -159,9 +159,9 @@ describe("Provider 故障演练", () => {
     });
   });
 
-  it("响应缺少 b64_json → UNKNOWN, retryable=false", async () => {
+  it("响应缺少 b64_json 与 url → UNKNOWN, retryable=false", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      fakeResponse(200, { data: [{ url: "http://example.com/img.png" }] }),
+      fakeResponse(200, { data: [{}] }),
     );
 
     const provider = await getProvider();
